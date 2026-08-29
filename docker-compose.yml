@@ -1,0 +1,65 @@
+name: evoagent
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: evoagent
+      POSTGRES_USER: evoagent
+      POSTGRES_PASSWORD: ${EVOAGENT_POSTGRES_PASSWORD:?EVOAGENT_POSTGRES_PASSWORD is required}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U evoagent"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+
+  evoagent:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      EVOAGENT_HOST: 0.0.0.0
+      EVOAGENT_DATABASE_URL: postgresql://evoagent:${EVOAGENT_POSTGRES_PASSWORD}@postgres:5432/evoagent
+      EVOAGENT_REDIS_URL: redis://redis:6379/0
+      EVOAGENT_ASYNC_WORKERS: 4
+      EVOAGENT_SKILLS_DIR: /app/skills
+      EVOAGENT_AUTH_REQUIRED: "true"
+      EVOAGENT_AUTH_SECRET: ${EVOAGENT_AUTH_SECRET:?EVOAGENT_AUTH_SECRET is required}
+      EVOAGENT_BOOTSTRAP_ADMIN_USERNAME: ${EVOAGENT_BOOTSTRAP_ADMIN_USERNAME:?EVOAGENT_BOOTSTRAP_ADMIN_USERNAME is required}
+      EVOAGENT_BOOTSTRAP_ADMIN_PASSWORD: ${EVOAGENT_BOOTSTRAP_ADMIN_PASSWORD:?EVOAGENT_BOOTSTRAP_ADMIN_PASSWORD is required}
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      - ./output:/app/output
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=3).read()"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  redis_data:

@@ -1,0 +1,94 @@
+"""Run one dataset case through the full four-role agentic reviewer."""
+import argparse
+import json
+import os
+import sys
+import time
+
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if ROOT not in sys.path:
+    sys.path.insert(0, ROOT)
+
+from evoagent.config import Settings  # noqa: E402
+from evoagent.evaluation_harness import load_jsonl  # noqa: E402
+from evoagent.evaluation_v2 import (  # noqa: E402
+    ProductArmReviewer,
+    ProductionEvaluationHarness,
+)
+from evoagent.llm import JsonChatClient  # noqa: E402
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Run one controlled PR through the full Agentic topology."
+    )
+    parser.add_argument("dataset")
+    parser.add_argument("--case-id", default="")
+    parser.add_argument("--timeout", type=int, default=60)
+    parser.add_argument("--token-budget", type=int, default=16000)
+    parser.add_argument("--time-budget", type=int, default=120)
+    parser.add_argument(
+        "--output",
+        default=os.path.join(
+            ROOT, "output", "agentic-evaluation", "single-case.json"
+        ),
+    )
+    args = parser.parse_args()
+
+    settings = Settings.from_env()
+    config = settings.resolved_llm()
+    if not config:
+        parser.error("a model provider must be configured")
+
+    cases = load_jsonl(args.dataset)
+    case = next(
+        (item for item in cases if item["id"] == args.case_id),
+        cases[0] if cases and not args.case_id else None,
+    )
+    if case is None:
+        parser.error("case was not found")
+    for finding in case["expected_findings"]:
+        finding.setdefault("should_comment", True)
+
+    client = JsonChatClient(
+        str(config["base_url"]),
+        str(config["api_key"]),
+        str(config["model"]),
+        provider=str(config["provider"]),
+        timeout=args.timeout,
+    )
+    reviewer = ProductArmReviewer(
+        "full-agentic", client, args.token_budget, args.time_budget
+    )
+    print(
+        "START case=%s split=%s model=%s timeout=%ss"
+        % (case["id"], case["split"], config["model"], args.timeout),
+        flush=True,
+    )
+    started = time.monotonic()
+    report = ProductionEvaluationHarness().run(
+        reviewer, [case], "single-full-agentic"
+    )
+    output = os.path.abspath(args.output)
+    os.makedirs(os.path.dirname(output), exist_ok=True)
+    with open(output, "w", encoding="utf-8", newline="\n") as handle:
+        json.dump(report, handle, ensure_ascii=False, indent=2, sort_keys=True)
+        handle.write("\n")
+    result = report["case_results"][0]
+    print(
+        "DONE case=%s success=%s predicted=%s tp=%s fp=%s fn=%s elapsed=%.1fs"
+        % (
+            result["id"], result["execution_success"], result["predicted"],
+            result["tp"], result["fp"], result["fn"],
+            time.monotonic() - started,
+        ),
+        flush=True,
+    )
+    if result.get("error"):
+        print("ERROR %s" % result["error"], flush=True)
+    print(output, flush=True)
+
+
+if __name__ == "__main__":
+    main()
