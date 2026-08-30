@@ -1,6 +1,7 @@
 """Run a resumable, progress-visible batch through the full Agentic reviewer."""
 import argparse
 from collections import Counter
+import hashlib
 import json
 import os
 import sys
@@ -59,10 +60,46 @@ def load_results(path: str, allowed_ids: set) -> dict:
     }
 
 
+def apply_suggestion_judgments(path: str, cases: list) -> dict:
+    if not path:
+        return {"provided": False, "cases": 0, "judgments": 0, "sha256": ""}
+    absolute = os.path.abspath(path)
+    with open(absolute, "rb") as handle:
+        raw = handle.read()
+    payload = json.loads(raw.decode("utf-8"))
+    by_case = payload.get("cases") or {}
+    if not isinstance(by_case, dict):
+        raise ValueError("suggestion judgment file requires an object in cases")
+    case_ids = {case["id"] for case in cases}
+    unknown = set(by_case).difference(case_ids)
+    if unknown:
+        raise ValueError(
+            "suggestion judgments reference unknown cases: %s"
+            % ", ".join(sorted(unknown))
+        )
+    count = 0
+    for case in cases:
+        judgments = by_case.get(case["id"], [])
+        if not isinstance(judgments, list):
+            raise ValueError("suggestion judgments must be arrays per case")
+        case["suggestion_judgments"] = judgments
+        count += len(judgments)
+    return {
+        "provided": True,
+        "status": str(payload.get("status", "unknown")),
+        "reviewer": str(payload.get("reviewer", "unknown")),
+        "cases": sum(bool(value) for value in by_case.values()),
+        "judgments": count,
+        "sha256": hashlib.sha256(raw).hexdigest(),
+        "path": absolute,
+    }
+
+
 def build_report(
     harness, selected: list, completed: dict, config: dict,
     token_budget: int, time_budget: int, timeout: int,
     started: float, status: str, source_dataset_sha256: str,
+    judgment_metadata: dict,
 ) -> dict:
     ordered = [completed[case["id"]] for case in selected if case["id"] in completed]
     totals = harness._empty_totals()
@@ -102,6 +139,7 @@ def build_report(
             "source_sha256": source_dataset_sha256,
             "selected_normalized_sha256": dataset_fingerprint(selected),
             "readiness": validate_real_dataset(selected),
+            "suggestion_judgments": judgment_metadata,
         },
         "metrics": harness._metrics(totals),
         "by_split": by_split,
@@ -129,6 +167,10 @@ def main() -> None:
     parser.add_argument("--time-budget", type=int, default=120)
     parser.add_argument("--seed-report", default="")
     parser.add_argument(
+        "--suggestion-judgments", default="",
+        help="Optional required/optional/invalid/duplicate adjudication JSON.",
+    )
+    parser.add_argument(
         "--output",
         default=os.path.join(
             ROOT, "output", "agentic-evaluation", "full-agentic-batch.json"
@@ -147,6 +189,9 @@ def main() -> None:
     for case in cases:
         for finding in case["expected_findings"]:
             finding.setdefault("should_comment", True)
+    judgment_metadata = apply_suggestion_judgments(
+        args.suggestion_judgments, cases
+    )
     selected = select_cases(cases, args.max_cases)
     allowed_ids = {case["id"] for case in selected}
     output = os.path.abspath(args.output)
@@ -161,10 +206,14 @@ def main() -> None:
         "full-agentic", client, args.token_budget, args.time_budget
     )
     harness = ProductionEvaluationHarness()
+    for case in selected:
+        if case["id"] in completed:
+            harness.rescore_suggestions(completed[case["id"]], case)
     started = time.monotonic()
     save_report(output, build_report(
         harness, selected, completed, config, args.token_budget,
         args.time_budget, args.timeout, started, "running", source_dataset_sha256,
+        judgment_metadata,
     ))
     for index, case in enumerate(selected, 1):
         if case["id"] in completed:
@@ -188,6 +237,7 @@ def main() -> None:
         save_report(output, build_report(
             harness, selected, completed, config, args.token_budget,
             args.time_budget, args.timeout, started, "running", source_dataset_sha256,
+            judgment_metadata,
         ))
         print(
             "DONE %d/%d case=%s success=%s predicted=%d suggestions=%d "
@@ -205,6 +255,7 @@ def main() -> None:
     save_report(output, build_report(
         harness, selected, completed, config, args.token_budget,
         args.time_budget, args.timeout, started, "complete", source_dataset_sha256,
+        judgment_metadata,
     ))
     print("COMPLETE %s" % output, flush=True)
 

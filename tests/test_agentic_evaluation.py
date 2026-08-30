@@ -130,6 +130,65 @@ class AgenticEvaluationTests(unittest.TestCase):
         self.assertEqual(1, metrics["incremental_suggestion_tp"])
         self.assertEqual(1.0, metrics["missed_finding_recovery_rate"])
         self.assertEqual(1.0, metrics["combined_recall_after_verification"])
+        self.assertEqual(1.0, metrics["suggestion_utility_rate"])
+
+    def test_suggestion_utility_uses_only_adjudicated_optional_and_invalid_labels(self):
+        suggestions = [
+            Finding(
+                rule_id=rule_id, severity=Severity.MEDIUM,
+                title=verdict, explanation="Adjudication fixture.",
+                path="app.py", line=line, evidence="value_%d" % line,
+                fix="Apply a focused fix.", test="Add a focused test.",
+                source="security", disposition="suggestion",
+            )
+            for line, rule_id, verdict in (
+                (1, "CWE-561", "optional"),
+                (2, "CWE-20", "invalid"),
+                (3, "CWE-248", "duplicate"),
+                (4, "CWE-999", "unjudged"),
+            )
+        ]
+
+        class SuggestionReviewer:
+            name = "adjudicated-suggestions"
+
+            def review_case(self, _case, _parsed):
+                return []
+
+            def evaluation_execution(self):
+                return {}
+
+            def evaluation_summary(self):
+                return {
+                    "suggestion_count": len(suggestions),
+                    "suggested_findings": [item.to_dict() for item in suggestions],
+                }
+
+        case = {
+            "id": "adjudicated-suggestions", "repository": "repo", "pull_request": 1,
+            "split": "validation", "source": {"kind": "synthetic-controlled"},
+            "diff": (
+                "--- a/app.py\n+++ b/app.py\n@@ -0,0 +1,4 @@\n"
+                "+value_1\n+value_2\n+value_3\n+value_4\n"
+            ),
+            "expected_findings": [],
+            "suggestion_judgments": [
+                {"path": "app.py", "line": 1, "rule_id": "CWE-561", "verdict": "optional"},
+                {"path": "app.py", "line": 2, "rule_id": "CWE-20", "verdict": "invalid"},
+                {"path": "app.py", "line": 3, "rule_id": "CWE-248", "verdict": "duplicate"},
+            ],
+        }
+
+        metrics = ProductionEvaluationHarness().run(
+            SuggestionReviewer(), [case], "adjudicated-suggestions"
+        )["metrics"]
+        self.assertEqual(1, metrics["suggestion_optional"])
+        self.assertEqual(1, metrics["suggestion_invalid"])
+        self.assertEqual(1, metrics["suggestion_duplicate"])
+        self.assertEqual(1, metrics["suggestion_unjudged"])
+        self.assertEqual(0.3333, metrics["suggestion_utility_rate"])
+        self.assertEqual(0.75, metrics["suggestion_adjudication_coverage"])
+        self.assertEqual(0.6667, metrics["suggestion_nuisance_rate"])
 
     def test_agentic_arms_share_exactly_fourteen_rules_and_real_role_topologies(self):
         self.assertEqual(14, len(LocalRuleReviewer.RULES) + len(ContextRuleReviewer.RULES))

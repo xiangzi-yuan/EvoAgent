@@ -113,6 +113,14 @@ Agentic 审查把输出分成两层，避免模型猜测污染正式指标或直
 - `findings`：可以发布的正式结论。确定性 Scanner 命中会被保护；普通 LLM 新发现必须同时满足 Lead 选择、Critic 的四项核验、仓库上下文可用，并引用仓库工具产生的证据。
 - `suggestions`：值得人工复核、但证据尚不完整的模型建议。它们会保留在 JSON 报告和协作审计中，但不会写入 GitHub 审查评论，也不会计入正式 Finding 指标。
 
+建议区不能用“是否命中原始答案”直接判定对错。评测支持独立的 `suggestion_judgments`，每条判定为 `required`（数据集漏标的必修问题）、`optional`（正确但非阻塞）、`invalid`（事实错误）或 `duplicate`（重复结论）。报告同时给出建议效用率、人工判定覆盖率、干扰率和未判定数量；覆盖率不足时不得只引用效用率作结论。
+
+判定文件格式见 `examples/suggestion_judgments.example.json`；复制后需将示例案例 ID 和位置替换为待评报告中的真实值。已有模型报告可以在不再次调用 API 的情况下重新计分：
+
+```powershell
+python scripts/run_full_agentic_batch.py pr_diff_100.jsonl --max-cases 10 --seed-report output/agentic-evaluation/model-report.json --suggestion-judgments output/agentic-evaluation/model-report-judgments.json --output output/agentic-evaluation/model-report-adjudicated.json
+```
+
 只提交 unified diff 时，模型能够分析新增行，但无法证明跨文件调用关系。若要审查隐藏逻辑、调用方和测试影响，需要同时传入服务进程可读取的绝对仓库路径：
 
 ```json

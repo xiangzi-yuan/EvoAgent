@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "status": "provisional",
+  "reviewer": "replace-with-reviewer-id",
+  "cases": {
+    "pr-example": [
+      {
+        "path": "src/example.py",
+        "line": 10,
+        "rule_id": "CWE-476",
+        "verdict": "required",
+        "note": "A merge-blocking defect omitted from the original required labels."
+      },
+      {
+        "path": "src/example.py",
+        "line": 12,
+        "rule_id": "MAINTAINABILITY",
+        "verdict": "optional",
+        "note": "Useful improvement, but not a merge blocker."
+      },
+      {
+        "path": "src/example.py",
+        "line": 14,
+        "rule_id": "CWE-20",
+        "verdict": "invalid",
+        "note": "The claimed failure cannot occur in the supplied repository context."
+      },
+      {
+        "path": "src/example.py",
+        "line": 16,
+        "rule_id": "CWE-20",
+        "verdict": "duplicate",
+        "note": "Already covered by another finding or suggestion."
+      }
+    ]
+  }
+}

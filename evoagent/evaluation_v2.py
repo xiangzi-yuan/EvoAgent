@@ -6,7 +6,13 @@ from typing import Any, Callable, Dict, List, Mapping, Optional
 
 from .agentic_core import ModeRouterReviewer
 from .evaluation_benchmark import ContextRuleReviewer
-from .evaluation_harness import EndToEndEvaluationHarness, dataset_fingerprint, one_to_one_match
+from .evaluation_harness import (
+    RULE_TO_CWE,
+    EndToEndEvaluationHarness,
+    dataset_fingerprint,
+    one_to_one_match,
+)
+from .finding_policy import normalize_rule_id
 from .llm import JsonChatClient
 from .models import Finding, Severity
 
@@ -225,6 +231,157 @@ def product_reviewer_factories(
 
 
 class ProductionEvaluationHarness(EndToEndEvaluationHarness):
+    SUGGESTION_VERDICTS = frozenset({"required", "optional", "invalid", "duplicate"})
+
+    @staticmethod
+    def _restore_findings(values):
+        findings = []
+        for value in values or []:
+            try:
+                item = dict(value)
+                item["severity"] = Severity(str(item["severity"]))
+                findings.append(Finding(**item))
+            except (KeyError, TypeError, ValueError):
+                continue
+        return findings
+
+    @classmethod
+    def _suggestion_judgments(cls, case):
+        judgments = []
+        for index, raw in enumerate(case.get("suggestion_judgments") or []):
+            if not isinstance(raw, dict):
+                raise ValueError("suggestion judgment %d must be an object" % index)
+            verdict = str(raw.get("verdict", "")).strip().lower()
+            if verdict not in cls.SUGGESTION_VERDICTS:
+                raise ValueError(
+                    "suggestion judgment %d has invalid verdict: %s" % (index, verdict)
+                )
+            try:
+                line = int(raw.get("line", raw.get("start_line", 0)))
+                end_line = int(raw.get("end_line", line))
+            except (TypeError, ValueError) as exc:
+                raise ValueError(
+                    "suggestion judgment %d has an invalid line" % index
+                ) from exc
+            if line < 1 or end_line < line or not str(raw.get("path", "")).strip():
+                raise ValueError(
+                    "suggestion judgment %d requires a valid path and line range" % index
+                )
+            if not str(raw.get("rule_id", raw.get("cwe", ""))).strip():
+                raise ValueError(
+                    "suggestion judgment %d requires rule_id or cwe" % index
+                )
+            rule_id = normalize_rule_id(str(raw.get("rule_id", raw.get("cwe", ""))))
+            judgments.append({
+                "path": str(raw.get("path", "")),
+                "start_line": line,
+                "end_line": end_line,
+                "rule_id": rule_id,
+                "cwe": str(raw.get("cwe") or RULE_TO_CWE.get(rule_id, rule_id)),
+                "severity": str(raw.get("severity", "medium")),
+                "verdict": verdict,
+                "note": str(raw.get("note", ""))[:2000],
+            })
+        return judgments
+
+    def _score_suggestions(self, result, case, findings, suggested_findings):
+        expected = [
+            item for item in case["expected_findings"]
+            if bool(item.get("should_comment", True))
+        ]
+        required_matches = one_to_one_match(
+            expected, suggested_findings, self.line_tolerance
+        )
+        required_prediction_indices = {
+            match.predicted_index for match in required_matches
+        }
+        formal_expected = {
+            int(item["expected_index"]) for item in result.get("matches") or []
+        }
+        adjudication = []
+        for match in required_matches:
+            duplicate_of_formal = match.expected_index in formal_expected
+            adjudication.append({
+                "suggestion_index": match.predicted_index,
+                "verdict": "duplicate" if duplicate_of_formal else "required",
+                "source": "expected_findings",
+                "expected_index": match.expected_index,
+                "note": (
+                    "already covered by a confirmed finding"
+                    if duplicate_of_formal else "recovers a required labelled finding"
+                ),
+            })
+
+        remaining = [
+            (index, finding) for index, finding in enumerate(suggested_findings)
+            if index not in required_prediction_indices
+        ]
+        judgments = self._suggestion_judgments(case)
+        judgment_matches = one_to_one_match(
+            judgments, [item[1] for item in remaining], self.line_tolerance
+        )
+        judged_remaining = set()
+        verdict_counts = Counter()
+        for match in judgment_matches:
+            original_index = remaining[match.predicted_index][0]
+            judgment = judgments[match.expected_index]
+            judged_remaining.add(match.predicted_index)
+            verdict_counts[judgment["verdict"]] += 1
+            adjudication.append({
+                "suggestion_index": original_index,
+                "verdict": judgment["verdict"],
+                "source": "suggestion_judgments",
+                "judgment_index": match.expected_index,
+                "note": judgment["note"],
+            })
+        for remaining_index, (original_index, _finding) in enumerate(remaining):
+            if remaining_index not in judged_remaining:
+                adjudication.append({
+                    "suggestion_index": original_index,
+                    "verdict": "unjudged",
+                    "source": "none",
+                })
+
+        combined = one_to_one_match(
+            expected, list(findings) + list(suggested_findings), self.line_tolerance
+        )
+        required_tp = len(required_matches)
+        required_recovery = sum(
+            match.expected_index not in formal_expected for match in required_matches
+        )
+        formal_duplicates = required_tp - required_recovery
+        optional = int(verdict_counts["optional"])
+        label_gap = int(verdict_counts["required"])
+        invalid = int(verdict_counts["invalid"])
+        duplicate = int(verdict_counts["duplicate"]) + formal_duplicates
+        unjudged = len(remaining) - len(judgment_matches)
+        result.update({
+            "suggestions": len(suggested_findings),
+            "suggested_findings": [item.to_dict() for item in suggested_findings],
+            "suggestion_tp": required_tp,
+            "suggestion_fp": invalid,
+            "suggestion_fn": len(expected) - required_tp,
+            "suggestion_optional": optional,
+            "suggestion_label_gap_required": label_gap,
+            "suggestion_invalid": invalid,
+            "suggestion_duplicate": duplicate,
+            "suggestion_unjudged": unjudged,
+            "suggestion_adjudicated": required_tp + len(judgment_matches),
+            "suggestion_useful": required_recovery + label_gap + optional,
+            "incremental_suggestion_tp": required_recovery,
+            "combined_tp_after_verification": len(combined),
+            "suggestion_adjudication": sorted(
+                adjudication, key=lambda item: item["suggestion_index"]
+            ),
+        })
+        return result
+
+    def rescore_suggestions(self, result, case):
+        """Re-score cached model output after adding human judgments, without new calls."""
+        findings = self._restore_findings(result.get("predicted_findings") or [])
+        suggestions = self._restore_findings(result.get("suggested_findings") or [])
+        return self._score_suggestions(result, case, findings, suggestions)
+
     def _run_case(self, reviewer, case):
         class RecordingReviewer:
             def __init__(self, delegate):
@@ -266,6 +423,14 @@ class ProductionEvaluationHarness(EndToEndEvaluationHarness):
             "suggestion_tp": 0,
             "suggestion_fp": 0,
             "suggestion_fn": result["expected"],
+            "suggestion_optional": 0,
+            "suggestion_label_gap_required": 0,
+            "suggestion_invalid": 0,
+            "suggestion_duplicate": 0,
+            "suggestion_unjudged": 0,
+            "suggestion_adjudicated": 0,
+            "suggestion_useful": 0,
+            "suggestion_adjudication": [],
             "incremental_suggestion_tp": 0,
             "combined_tp_after_verification": result["tp"],
         })
@@ -303,34 +468,12 @@ class ProductionEvaluationHarness(EndToEndEvaluationHarness):
                 result["suggestions"] = int(
                     result["agentic_summary"].get("suggestion_count", 0) or 0
                 )
-                suggested_findings = []
-                for value in result["agentic_summary"].get("suggested_findings") or []:
-                    try:
-                        item = dict(value)
-                        item["severity"] = Severity(str(item["severity"]))
-                        suggested_findings.append(Finding(**item))
-                    except (KeyError, TypeError, ValueError):
-                        continue
-                result["suggested_findings"] = [
-                    item.to_dict() for item in suggested_findings
-                ]
-                suggestion_matches = one_to_one_match(
-                    expected, suggested_findings, self.line_tolerance
+                suggested_findings = self._restore_findings(
+                    result["agentic_summary"].get("suggested_findings") or []
                 )
-                formal_expected = {
-                    int(item["expected_index"]) for item in result.get("matches") or []
-                }
-                result["suggestion_tp"] = len(suggestion_matches)
-                result["suggestion_fp"] = len(suggested_findings) - len(suggestion_matches)
-                result["suggestion_fn"] = len(expected) - len(suggestion_matches)
-                result["incremental_suggestion_tp"] = sum(
-                    match.expected_index not in formal_expected
-                    for match in suggestion_matches
+                self._score_suggestions(
+                    result, case, findings, suggested_findings
                 )
-                combined = one_to_one_match(
-                    expected, list(findings) + suggested_findings, self.line_tolerance
-                )
-                result["combined_tp_after_verification"] = len(combined)
         return result
 
     @staticmethod
@@ -343,6 +486,10 @@ class ProductionEvaluationHarness(EndToEndEvaluationHarness):
             "llm_calls": 0, "input_tokens": 0,
             "output_tokens": 0, "total_tokens": 0, "suggestions": 0,
             "suggestion_tp": 0, "suggestion_fp": 0, "suggestion_fn": 0,
+            "suggestion_optional": 0, "suggestion_label_gap_required": 0,
+            "suggestion_invalid": 0, "suggestion_duplicate": 0,
+            "suggestion_unjudged": 0, "suggestion_adjudicated": 0,
+            "suggestion_useful": 0,
             "incremental_suggestion_tp": 0,
             "combined_tp_after_verification": 0,
             "clean_cases_without_suggestions": 0,
@@ -358,6 +505,9 @@ class ProductionEvaluationHarness(EndToEndEvaluationHarness):
             "llm_calls", "input_tokens", "output_tokens", "total_tokens",
             "suggestions",
             "suggestion_tp", "suggestion_fp", "suggestion_fn",
+            "suggestion_optional", "suggestion_label_gap_required",
+            "suggestion_invalid", "suggestion_duplicate", "suggestion_unjudged",
+            "suggestion_adjudicated", "suggestion_useful",
             "incremental_suggestion_tp", "combined_tp_after_verification",
         ):
             totals[field] += int(result.get(field, 0))
@@ -372,7 +522,6 @@ class ProductionEvaluationHarness(EndToEndEvaluationHarness):
         cases = totals["cases"] or 1
         tp = totals["tp"] or 1
         commented = totals["accepted_comments"] + totals["closed_comments"]
-        suggestion_predictions = totals["suggestion_tp"] + totals["suggestion_fp"]
         expected_total = totals["tp"] + totals["fn"]
         values.update({
             "invalid_comments_per_pr": round(totals["invalid_comments"] / cases, 4),
@@ -390,13 +539,23 @@ class ProductionEvaluationHarness(EndToEndEvaluationHarness):
             "average_output_tokens_per_pr": round(totals["output_tokens"] / cases, 2),
             "average_total_tokens_per_pr": round(totals["total_tokens"] / cases, 2),
             "average_suggestions_per_pr": round(totals["suggestions"] / cases, 4),
-            "suggestion_precision": round(
-                totals["suggestion_tp"] / suggestion_predictions, 4
-            ) if suggestion_predictions else 0.0,
-            "suggestion_recall": round(
+            "suggestion_utility_rate": round(
+                totals["suggestion_useful"] / totals["suggestion_adjudicated"], 4
+            ) if totals["suggestion_adjudicated"] else None,
+            "suggestion_adjudication_coverage": round(
+                totals["suggestion_adjudicated"] / totals["suggestions"], 4
+            ) if totals["suggestions"] else 1.0,
+            "suggestion_nuisance_rate": round(
+                (totals["suggestion_invalid"] + totals["suggestion_duplicate"])
+                / totals["suggestion_adjudicated"], 4
+            ) if totals["suggestion_adjudicated"] else None,
+            "strict_required_match_rate_per_suggestion": round(
+                totals["suggestion_tp"] / totals["suggestions"], 4
+            ) if totals["suggestions"] else 0.0,
+            "strict_required_suggestion_recall": round(
                 totals["suggestion_tp"] / expected_total, 4
             ) if expected_total else 1.0,
-            "suggestion_clean_accuracy": round(
+            "strict_clean_silence_rate": round(
                 totals["clean_cases_without_suggestions"] / totals["clean_cases"], 4
             ) if totals["clean_cases"] else 1.0,
             "missed_finding_recovery_rate": round(
