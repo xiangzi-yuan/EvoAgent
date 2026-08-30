@@ -106,6 +106,26 @@ $env:EVOAGENT_LLM_MODEL = '<model-name>'
 
 密钥只通过环境变量读取，不要提交到仓库。
 
+### 结论分层与仓库上下文
+
+Agentic 审查把输出分成两层，避免模型猜测污染正式指标或直接发布到 PR：
+
+- `findings`：可以发布的正式结论。确定性 Scanner 命中会被保护；普通 LLM 新发现必须同时满足 Lead 选择、Critic 的四项核验、仓库上下文可用，并引用仓库工具产生的证据。
+- `suggestions`：值得人工复核、但证据尚不完整的模型建议。它们会保留在 JSON 报告和协作审计中，但不会写入 GitHub 审查评论，也不会计入正式 Finding 指标。
+
+只提交 unified diff 时，模型能够分析新增行，但无法证明跨文件调用关系。若要审查隐藏逻辑、调用方和测试影响，需要同时传入服务进程可读取的绝对仓库路径：
+
+```json
+{
+  "repository": "owner/repository",
+  "repository_root": "D:\\work\\repository",
+  "mode": "agentic",
+  "diff": "<unified diff>"
+}
+```
+
+Docker 部署时，`repository_root` 必须是容器内路径，并且对应仓库应以只读卷挂载。当前受控 100 条数据集只包含 diff、不包含完整 checkout，因此模型新增结论会进入 `suggestions`；这类实验能验证执行链和增量价值，不能证明跨仓库语义审查能力。
+
 项目启动时会自动读取项目根目录的 `.env`，也兼容 `evoagent/.env`；系统环境变量优先于 `.env` 文件。推荐将以下内容写入根目录 `.env`（该文件已被 `.gitignore` 忽略）：
 
 ```env
@@ -260,4 +280,3 @@ HTTP / GitHub Webhook
               ├── Critic Worker：由 Lead 委派的盲审、反例与证据挑战
               └── Gates
 ```
-

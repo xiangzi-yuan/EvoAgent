@@ -64,6 +64,9 @@ class FakeAgenticClient:
                     "fix": "Complete the behavior before merge.",
                     "test": "Add a regression test for the unfinished path.",
                     "confidence": 0.8,
+                    "skill": (
+                        task.get("active_agent_skills") or [{}]
+                    )[0].get("name", ""),
                 }]}
             return {"action": "final", "findings": []}
         if role == "security":
@@ -75,6 +78,10 @@ class FakeAgenticClient:
                     {
                         "finding_index": index,
                         "accepted": True,
+                        "introduced_by_diff": True,
+                        "reproducible": True,
+                        "evidence_sufficient": True,
+                        "would_comment_on_real_pr": True,
                         "objections": [],
                         "confidence_adjustment": 0.0,
                     }

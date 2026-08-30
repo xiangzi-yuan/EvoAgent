@@ -6,8 +6,10 @@ from evoagent.evaluation_benchmark import ContextRuleReviewer
 from evoagent.evaluation_v2 import (
     FairAblationSuite,
     ProductArmReviewer,
+    ProductionEvaluationHarness,
     product_reviewer_factories,
 )
+from evoagent.models import Finding, Severity
 from evoagent.reviewer import LocalRuleReviewer
 
 
@@ -82,6 +84,53 @@ class FakeClient:
 
 
 class AgenticEvaluationTests(unittest.TestCase):
+    def test_suggestion_metrics_measure_recovery_without_publishing_the_claim(self):
+        suggestion = Finding(
+            rule_id="CWE-502", severity=Severity.HIGH,
+            title="Unsafe deserialization", explanation="Untrusted bytes are loaded.",
+            path="app.py", line=1, evidence="pickle.loads(value)",
+            fix="Use a safe format.", test="Reject a crafted payload.",
+            source="security", disposition="suggestion",
+        )
+
+        class SuggestionOnlyReviewer:
+            name = "suggestion-only"
+
+            def review_case(self, _case, _parsed):
+                return []
+
+            def evaluation_execution(self):
+                return {}
+
+            def evaluation_summary(self):
+                return {
+                    "suggestion_count": 1,
+                    "suggested_findings": [suggestion.to_dict()],
+                }
+
+        case = {
+            "id": "suggestion-recovery", "repository": "repo", "pull_request": 1,
+            "split": "validation", "source": {"kind": "synthetic-controlled"},
+            "diff": (
+                "--- a/app.py\n+++ b/app.py\n@@ -0,0 +1 @@\n"
+                "+pickle.loads(value)\n"
+            ),
+            "expected_findings": [{
+                "path": "app.py", "start_line": 1, "end_line": 1,
+                "rule_id": "SEC-PICKLE-LOAD", "cwe": "CWE-502",
+                "severity": "high", "should_comment": True,
+            }],
+        }
+
+        report = ProductionEvaluationHarness().run(
+            SuggestionOnlyReviewer(), [case], "suggestion-recovery"
+        )
+        metrics = report["metrics"]
+        self.assertEqual(0, metrics["tp"])
+        self.assertEqual(1, metrics["incremental_suggestion_tp"])
+        self.assertEqual(1.0, metrics["missed_finding_recovery_rate"])
+        self.assertEqual(1.0, metrics["combined_recall_after_verification"])
+
     def test_agentic_arms_share_exactly_fourteen_rules_and_real_role_topologies(self):
         self.assertEqual(14, len(LocalRuleReviewer.RULES) + len(ContextRuleReviewer.RULES))
         expected_calls = {
@@ -103,6 +152,17 @@ class AgenticEvaluationTests(unittest.TestCase):
                 actual[item["role"]] = actual.get(item["role"], 0) + 1
             self.assertEqual(calls, actual)
             self.assertEqual(14, reviewer.evaluation_config()["deterministic_rules"])
+
+    def test_weak_hash_rule_ignores_fixed_fixture_but_keeps_dynamic_input(self):
+        diff = (
+            "--- a/app.py\n+++ b/app.py\n@@ -0,0 +1,2 @@\n"
+            "+fixture = hashlib.md5(b'fixture-id').hexdigest()\n"
+            "+digest = hashlib.md5(value).hexdigest()\n"
+        )
+        findings = ContextRuleReviewer().review(diff, parse_unified_diff(diff))
+
+        self.assertEqual(1, len(findings))
+        self.assertEqual("digest = hashlib.md5(value).hexdigest()", findings[0].evidence)
 
     def test_non_production_data_can_debug_but_cannot_prove_claims(self):
         cases = []

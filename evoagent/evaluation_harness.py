@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from .diff_parser import parse_unified_diff
+from .finding_policy import normalize_rule_id
 from .models import Finding, Severity
 from .reviewer import Reviewer
 from .verifier import RepairVerifier
@@ -128,7 +129,8 @@ def _candidate_edges(
         for predicted_index, finding in enumerate(predicted):
             if _normalized_path(finding.path) != truth_path:
                 continue
-            if RULE_TO_CWE.get(finding.rule_id, finding.rule_id).upper() != truth_cwe:
+            canonical_rule = normalize_rule_id(finding.rule_id)
+            if RULE_TO_CWE.get(canonical_rule, canonical_rule).upper() != truth_cwe:
                 continue
             if start <= finding.line <= end:
                 distance = 0

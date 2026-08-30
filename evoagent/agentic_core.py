@@ -10,6 +10,13 @@ import time
 from typing import Any, Dict, Iterable, List, Optional, Set
 
 from .diff_parser import ParsedDiff
+from .finding_policy import (
+    finding_identity,
+    is_deterministic_finding,
+    is_validated_agent_skill_finding,
+    normalize_rule_id,
+    repository_evidence_refs,
+)
 from .context_manager import ContextManager
 from .gates import FindingGate
 from .llm import JsonChatClient
@@ -53,7 +60,7 @@ Use tools when facts are missing; otherwise you may finish. Return JSON only. To
 Final action: {"action":"final","findings":[{"rule_id":"...","severity":"critical|high|medium|low",
 "title":"...","explanation":"...","path":"...","line":1,"evidence":"exact code",
 "evidence_ids":["tool:id"],"call_chain":[{"path":"...","line":1,"symbol":"..."}],
-"fix":"...","test":"...","confidence":0.0}]}"""
+"fix":"...","test":"...","confidence":0.0,"skill":"active-skill-name-or-empty"}]}"""
 
 RELIABILITY_PROMPT = """You are the Correctness/Reliability Agent. Inspect state transitions,
 exceptions, concurrency, resource lifetime, compatibility and related tests. Report only defects
@@ -63,11 +70,21 @@ you may finish. You are a worker reporting only to the Lead Agent. Return the sa
 protocol and finding schema described by the managed context."""
 
 CRITIC_PROMPT = """You are the Critic worker performing a blind review for the Lead Agent. Candidate source identities
-are removed. Search for counterexamples, wrong locations, missing preconditions and unsupported
-severity. Independently use factual tools when needed, or finish directly. Never create new findings.
+are removed. Your primary job is to prevent false-positive PR comments. Search for counterexamples,
+wrong locations, pre-existing behavior, missing preconditions and unsupported severity. A quoted diff
+line proves only that text exists; it does not prove the claimed bug. Independently use repository tools
+when a semantic claim needs context. Never create new findings. If context is unavailable or the trigger
+cannot be established, reject the candidate for publication rather than speculate.
 Return JSON only. Tool action: {"action":"tool","tool":"name","arguments":{},"reason":"..."}
 Final action: {"action":"final","decisions":[{"finding_index":0,"accepted":true,
-"objections":["..."],"confidence_adjustment":0.0,"supporting_evidence_ids":["tool:id"]}]}"""
+"introduced_by_diff":true,"reproducible":true,"evidence_sufficient":true,
+"would_comment_on_real_pr":true,"objections":["..."],"confidence_adjustment":0.0,
+"supporting_evidence_ids":["tool:id"]}]}"""
+
+RULE_ID_GUIDANCE = (
+    "\nRule IDs: reuse a scanner ID; else use CWE-ID or a descriptive ID, never SEC-001. "
+    "Set skill only when that active Skill supplied the rule.\n"
+)
 
 ROLE_PERMISSIONS = {
     "lead": {"list_repository", "search_diff", "read_project_controls", "locate_tests"},
@@ -216,9 +233,13 @@ class BoundedRole:
         raise RuntimeBudgetExceeded("%s step budget exhausted" % self.name)
 
 
-def _parse_findings(result: dict, parsed: ParsedDiff, role: str) -> List[Finding]:
+def _parse_findings(
+    result: dict, parsed: ParsedDiff, role: str,
+    validated_skills: Iterable[str] = (),
+) -> List[Finding]:
     valid = {(item.path, item.line) for item in parsed.added_lines}
     evidence = _collect_evidence(result.get("_observations") or [])
+    validated_skills = set(validated_skills)
     findings = []
     for raw in result.get("findings") or []:
         try:
@@ -240,14 +261,22 @@ def _parse_findings(result: dict, parsed: ParsedDiff, role: str) -> List[Finding
             confidence = float(raw.get("confidence", 0.7))
         except (TypeError, ValueError):
             confidence = 0.7
+        original_rule_id = str(raw.get("rule_id", "LLM-OTHER"))[:160]
+        rule_id = normalize_rule_id(original_rule_id)
+        claimed_skill = str(raw.get("skill", "")).strip()
+        source = (
+            "agent-skill:" + claimed_skill
+            if claimed_skill in validated_skills else role
+        )
         findings.append(Finding(
-            rule_id=str(raw.get("rule_id", "LLM-REVIEW"))[:80],
+            rule_id=rule_id,
             severity=severity, title=str(raw.get("title", "Review finding"))[:200],
             explanation=str(raw.get("explanation", ""))[:4000], path=path, line=line,
             evidence=str(raw.get("evidence", ""))[:500],
             fix=str(raw.get("fix", ""))[:4000], test=str(raw.get("test", ""))[:4000],
             confidence=max(0.0, min(1.0, confidence)), evidence_refs=refs,
-            call_chain=chain, source=role,
+            call_chain=chain, source=source,
+            original_rule_id=(original_rule_id if original_rule_id != rule_id else ""),
         ))
     return findings
 
@@ -400,6 +429,7 @@ class ModeRouterReviewer(Reviewer):
             ],
             "execution": execution,
             "collaboration": collaboration,
+            "suggested_findings": list(collaboration.get("suggested_findings") or []),
             "gates": gated.checks,
             "rejected_findings": gated.rejected,
             "repository_context": {
@@ -496,7 +526,8 @@ class ModeRouterReviewer(Reviewer):
                 "delegations": [], "worker_results": {},
                 "lead_assessments": [], "revision_results": {},
                 "critic_decisions": [], "lead_final": {},
-                "accepted_findings": [],
+                "accepted_findings": [], "suggested_findings": [],
+                "publication_decisions": [],
             }
 
         if not session.get("scanner_complete"):
@@ -668,8 +699,16 @@ class ModeRouterReviewer(Reviewer):
                     if item.get("accepted")
                 ]
             session["lead_final"] = self._public_decision(final_decision)
-        accepted = self._apply_lead_final(session["lead_final"], candidates)
+        lead_accepted = self._apply_lead_final(session["lead_final"], candidates)
+        accepted, suggestions, publication_decisions = self._partition_publication(
+            rule_findings, candidates, lead_accepted,
+            session["critic_decisions"], suite.repository_available,
+            critic_required="critic" in enabled,
+        )
+        session["lead_accepted_findings"] = [item.to_dict() for item in lead_accepted]
         session["accepted_findings"] = [item.to_dict() for item in accepted]
+        session["suggested_findings"] = [item.to_dict() for item in suggestions]
+        session["publication_decisions"] = publication_decisions
         session["phase"] = "completed"
         session.setdefault("stop_reason", "lead-final")
         self._save_lead_session(task_id, session, ledger, completed=True)
@@ -696,6 +735,9 @@ class ModeRouterReviewer(Reviewer):
             "scanner_findings": len(rule_findings),
             "candidate_findings_before_critic": session["candidate_findings_before_critic"],
             "accepted_findings": len(accepted),
+            "suggested_findings": session["suggested_findings"],
+            "suggestion_count": len(suggestions),
+            "publication_decisions": publication_decisions,
             "critic_decisions": session["critic_decisions"],
             "stop_reason": session["stop_reason"],
         }
@@ -870,6 +912,7 @@ class ModeRouterReviewer(Reviewer):
             prompt = SECURITY_PROMPT if worker == "security" else (
                 RELIABILITY_PROMPT + "\n" + SECURITY_PROMPT.split("Final action:", 1)[-1]
             )
+            prompt += RULE_ID_GUIDANCE
             if self.prompt_overlay:
                 prompt += "\nActive validated prompt overlay:\n" + self.prompt_overlay
             if selected_skills:
@@ -941,8 +984,14 @@ class ModeRouterReviewer(Reviewer):
                 assignment = futures[future]
                 run_id = str(assignment.get("run_id") or assignment["assignment_id"])
                 try:
+                    validated_skill_names = {
+                        name for name in assignment.get("skills") or []
+                        if name in (available_skills or {})
+                        and available_skills[name].source == "evolved-db"
+                    }
                     findings = _parse_findings(
-                        future.result(), parsed, assignment["worker"]
+                        future.result(), parsed, assignment["worker"],
+                        validated_skill_names,
                     )
                     result = {
                         "assignment_id": assignment["assignment_id"],
@@ -1071,6 +1120,14 @@ class ModeRouterReviewer(Reviewer):
         for index, finding in enumerate(candidates):
             decision = by_index.get(index)
             accepted = bool(decision and decision.get("accepted"))
+            verification = {
+                key: bool(decision and decision.get(key))
+                for key in (
+                    "introduced_by_diff", "reproducible",
+                    "evidence_sufficient", "would_comment_on_real_pr",
+                )
+            }
+            publication_ready = accepted and all(verification.values())
             if decision:
                 try:
                     adjustment = float(decision.get("confidence_adjustment", 0))
@@ -1084,6 +1141,8 @@ class ModeRouterReviewer(Reviewer):
                 )
             decisions.append({
                 "finding_index": index, "accepted": accepted,
+                "publication_ready": publication_ready,
+                **verification,
                 "objections": (decision or {}).get(
                     "objections", ["critic returned no explicit decision"]
                 ),
@@ -1113,6 +1172,87 @@ class ModeRouterReviewer(Reviewer):
             accepted.append(finding)
         return accepted
 
+    @classmethod
+    def _partition_publication(
+        cls, rule_findings, candidates, lead_accepted, critic_decisions,
+        repository_available, critic_required=True,
+    ):
+        """Protect deterministic findings and quarantine unverified LLM discoveries."""
+        lead_identities = {finding_identity(item) for item in lead_accepted}
+        critic_by_index = {
+            int(item.get("finding_index")): item
+            for item in critic_decisions or []
+            if isinstance(item, dict) and str(item.get("finding_index", "")).isdigit()
+        }
+        published = list(rule_findings)
+        suggestions = []
+        decisions = []
+        for index, finding in enumerate(candidates):
+            identity = finding_identity(finding)
+            lead_selected = identity in lead_identities
+            critic = critic_by_index.get(index) or {}
+            if is_deterministic_finding(finding):
+                finding.disposition = "confirmed"
+                decisions.append({
+                    "finding_index": index, "rule_id": finding.rule_id,
+                    "source": finding.source, "disposition": "confirmed",
+                    "reasons": ["protected deterministic scanner baseline"],
+                })
+                continue
+
+            if is_validated_agent_skill_finding(finding):
+                disposition = "confirmed" if lead_selected else "rejected"
+                if lead_selected:
+                    finding.disposition = "confirmed"
+                    published.append(finding)
+                decisions.append({
+                    "finding_index": index, "rule_id": finding.rule_id,
+                    "source": finding.source, "disposition": disposition,
+                    "reasons": [
+                        "explicit validated Agent Skill and Lead selection"
+                        if lead_selected else "Lead did not select the Agent Skill finding"
+                    ],
+                })
+                continue
+
+            reasons = []
+            if not lead_selected:
+                reasons.append("Lead did not select the candidate")
+            if critic_required and not critic.get("publication_ready"):
+                reasons.append("Critic did not complete all publication checks")
+            if not repository_available:
+                reasons.append("repository context is unavailable")
+            repository_refs = repository_evidence_refs(finding)
+            if not repository_refs:
+                reasons.append("no repository-backed tool evidence")
+
+            if not reasons:
+                finding.disposition = "confirmed"
+                published.append(finding)
+                disposition = "confirmed"
+            elif lead_selected:
+                finding.disposition = "suggestion"
+                finding.gate = {
+                    "passed": False, "disposition": "suggestion",
+                    "reasons": list(reasons),
+                    "repository_evidence_count": len(repository_refs),
+                }
+                suggestions.append(finding)
+                disposition = "suggestion"
+            else:
+                disposition = "rejected"
+            decisions.append({
+                "finding_index": index, "rule_id": finding.rule_id,
+                "original_rule_id": finding.original_rule_id,
+                "source": finding.source, "disposition": disposition,
+                "reasons": reasons,
+                "repository_evidence_ids": [
+                    item.get("evidence_id") for item in repository_refs
+                ],
+            })
+
+        return cls._merge(published), cls._merge(suggestions), decisions
+
     @staticmethod
     def _restore_findings(values):
         findings = []
@@ -1129,6 +1269,8 @@ class ModeRouterReviewer(Reviewer):
                     evidence_refs=list(value.get("evidence_refs") or []),
                     call_chain=list(value.get("call_chain") or []),
                     source=str(value.get("source", "unknown")),
+                    original_rule_id=str(value.get("original_rule_id", "")),
+                    disposition=str(value.get("disposition", "candidate")),
                 ))
             except (TypeError, ValueError):
                 continue
@@ -1178,7 +1320,19 @@ class ModeRouterReviewer(Reviewer):
         for finding in findings:
             key = (finding.path, finding.line, finding.rule_id)
             current = merged.get(key)
-            if current is None or finding.confidence > current.confidence:
+            priority = (
+                2 if is_deterministic_finding(finding)
+                else 1 if is_validated_agent_skill_finding(finding) else 0
+            )
+            current_priority = (
+                2 if current is not None and is_deterministic_finding(current)
+                else 1 if current is not None and is_validated_agent_skill_finding(current)
+                else 0
+            )
+            if (
+                current is None or priority > current_priority
+                or (priority == current_priority and finding.confidence > current.confidence)
+            ):
                 merged[key] = finding
         order = {Severity.CRITICAL: 0, Severity.HIGH: 1, Severity.MEDIUM: 2, Severity.LOW: 3}
         return sorted(merged.values(), key=lambda item: (order[item.severity], item.path, item.line))

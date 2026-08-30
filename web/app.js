@@ -372,6 +372,7 @@ $("#review-form").addEventListener("submit", async (event) => {
   const values = new FormData(form);
   const body = { repository: values.get("repository"), diff: values.get("diff"), mode: values.get("mode") };
   if (values.get("pull_request")) body.pull_request = Number(values.get("pull_request"));
+  if (values.get("repository_root")) body.repository_root = values.get("repository_root");
   const asyncQuery = values.get("async") ? "?async=true" : "";
   const output = $("#review-result");
   output.classList.remove("empty");

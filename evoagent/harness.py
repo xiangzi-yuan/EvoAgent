@@ -156,13 +156,19 @@ class ReviewHarness:
             execution["gates"] = reviewer_summary.get("gates") or {}
             execution["rejected_findings"] = reviewer_summary.get("rejected_findings") or []
             execution["repository_context"] = reviewer_summary.get("repository_context") or {}
+            suggestions = [
+                self._finding_from_dict(item)
+                for item in reviewer_summary.get("suggested_findings") or []
+            ]
         else:
             collaboration = reviewer_summary or self._persisted_collaboration_summary(state["task_id"])
             run_mode, components, execution = {}, [], {}
+            suggestions = []
         report = ReviewReport(
             repository=state["repository"], pull_request=state.get("pull_request"),
             summary=self._summary(findings, len(parsed.files), risk), risk=risk,
-            findings=findings, files_reviewed=parsed.files, reviewer=self.reviewer.name,
+            findings=findings, suggestions=suggestions,
+            files_reviewed=parsed.files, reviewer=self.reviewer.name,
             collaboration=collaboration,
             run_mode=run_mode, components=components, execution=execution,
         )
@@ -218,6 +224,9 @@ class ReviewHarness:
             repository=value["repository"], pull_request=value.get("pull_request"),
             summary=value["summary"], risk=value["risk"],
             findings=[cls._finding_from_dict(item) for item in value.get("findings", [])],
+            suggestions=[
+                cls._finding_from_dict(item) for item in value.get("suggestions", [])
+            ],
             files_reviewed=list(value.get("files_reviewed", [])),
             reviewer=value.get("reviewer", "unknown"),
             collaboration=dict(value.get("collaboration", {})),

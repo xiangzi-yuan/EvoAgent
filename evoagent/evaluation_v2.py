@@ -8,6 +8,7 @@ from .agentic_core import ModeRouterReviewer
 from .evaluation_benchmark import ContextRuleReviewer
 from .evaluation_harness import EndToEndEvaluationHarness, dataset_fingerprint, one_to_one_match
 from .llm import JsonChatClient
+from .models import Finding, Severity
 
 
 REQUIRED_ARMS = (
@@ -177,6 +178,11 @@ class ProductArmReviewer:
                 collaboration.get("candidate_findings_before_critic", 0) or 0
             ),
             "accepted_findings": int(collaboration.get("accepted_findings", 0) or 0),
+            "suggestion_count": int(collaboration.get("suggestion_count", 0) or 0),
+            "suggested_findings": list(summary.get("suggested_findings") or []),
+            "publication_decisions": list(
+                collaboration.get("publication_decisions") or []
+            ),
             "critic_decisions": list(collaboration.get("critic_decisions") or []),
             "lead_final": dict(lead.get("final") or {}),
             "stop_reason": str(collaboration.get("stop_reason") or ""),
@@ -255,6 +261,13 @@ class ProductionEvaluationHarness(EndToEndEvaluationHarness):
             "total_tokens": 0,
             "model_roles": {},
             "agentic_summary": {},
+            "suggestions": 0,
+            "suggested_findings": [],
+            "suggestion_tp": 0,
+            "suggestion_fp": 0,
+            "suggestion_fn": result["expected"],
+            "incremental_suggestion_tp": 0,
+            "combined_tp_after_verification": result["tp"],
         })
         if result["execution_success"]:
             findings = recording.findings
@@ -287,6 +300,37 @@ class ProductionEvaluationHarness(EndToEndEvaluationHarness):
             summary_reader = getattr(reviewer, "evaluation_summary", None)
             if summary_reader:
                 result["agentic_summary"] = summary_reader() or {}
+                result["suggestions"] = int(
+                    result["agentic_summary"].get("suggestion_count", 0) or 0
+                )
+                suggested_findings = []
+                for value in result["agentic_summary"].get("suggested_findings") or []:
+                    try:
+                        item = dict(value)
+                        item["severity"] = Severity(str(item["severity"]))
+                        suggested_findings.append(Finding(**item))
+                    except (KeyError, TypeError, ValueError):
+                        continue
+                result["suggested_findings"] = [
+                    item.to_dict() for item in suggested_findings
+                ]
+                suggestion_matches = one_to_one_match(
+                    expected, suggested_findings, self.line_tolerance
+                )
+                formal_expected = {
+                    int(item["expected_index"]) for item in result.get("matches") or []
+                }
+                result["suggestion_tp"] = len(suggestion_matches)
+                result["suggestion_fp"] = len(suggested_findings) - len(suggestion_matches)
+                result["suggestion_fn"] = len(expected) - len(suggestion_matches)
+                result["incremental_suggestion_tp"] = sum(
+                    match.expected_index not in formal_expected
+                    for match in suggestion_matches
+                )
+                combined = one_to_one_match(
+                    expected, list(findings) + suggested_findings, self.line_tolerance
+                )
+                result["combined_tp_after_verification"] = len(combined)
         return result
 
     @staticmethod
@@ -297,7 +341,11 @@ class ProductionEvaluationHarness(EndToEndEvaluationHarness):
             "accepted_comments": 0, "closed_comments": 0,
             "latency_ms": 0, "cost_microusd": 0,
             "llm_calls": 0, "input_tokens": 0,
-            "output_tokens": 0, "total_tokens": 0,
+            "output_tokens": 0, "total_tokens": 0, "suggestions": 0,
+            "suggestion_tp": 0, "suggestion_fp": 0, "suggestion_fn": 0,
+            "incremental_suggestion_tp": 0,
+            "combined_tp_after_verification": 0,
+            "clean_cases_without_suggestions": 0,
         })
         return values
 
@@ -308,8 +356,14 @@ class ProductionEvaluationHarness(EndToEndEvaluationHarness):
             "invalid_comments", "exact_location_hits", "evidence_hits",
             "accepted_comments", "closed_comments", "latency_ms",
             "llm_calls", "input_tokens", "output_tokens", "total_tokens",
+            "suggestions",
+            "suggestion_tp", "suggestion_fp", "suggestion_fn",
+            "incremental_suggestion_tp", "combined_tp_after_verification",
         ):
             totals[field] += int(result.get(field, 0))
+        totals["clean_cases_without_suggestions"] += int(
+            result.get("expected", 0) == 0 and result.get("suggestions", 0) == 0
+        )
         totals["cost_microusd"] += int(float(result.get("cost_usd", 0)) * 1_000_000)
 
     @staticmethod
@@ -318,6 +372,8 @@ class ProductionEvaluationHarness(EndToEndEvaluationHarness):
         cases = totals["cases"] or 1
         tp = totals["tp"] or 1
         commented = totals["accepted_comments"] + totals["closed_comments"]
+        suggestion_predictions = totals["suggestion_tp"] + totals["suggestion_fp"]
+        expected_total = totals["tp"] + totals["fn"]
         values.update({
             "invalid_comments_per_pr": round(totals["invalid_comments"] / cases, 4),
             "exact_line_accuracy": round(totals["exact_location_hits"] / tp, 4),
@@ -333,6 +389,22 @@ class ProductionEvaluationHarness(EndToEndEvaluationHarness):
             "average_input_tokens_per_pr": round(totals["input_tokens"] / cases, 2),
             "average_output_tokens_per_pr": round(totals["output_tokens"] / cases, 2),
             "average_total_tokens_per_pr": round(totals["total_tokens"] / cases, 2),
+            "average_suggestions_per_pr": round(totals["suggestions"] / cases, 4),
+            "suggestion_precision": round(
+                totals["suggestion_tp"] / suggestion_predictions, 4
+            ) if suggestion_predictions else 0.0,
+            "suggestion_recall": round(
+                totals["suggestion_tp"] / expected_total, 4
+            ) if expected_total else 1.0,
+            "suggestion_clean_accuracy": round(
+                totals["clean_cases_without_suggestions"] / totals["clean_cases"], 4
+            ) if totals["clean_cases"] else 1.0,
+            "missed_finding_recovery_rate": round(
+                totals["incremental_suggestion_tp"] / totals["fn"], 4
+            ) if totals["fn"] else 1.0,
+            "combined_recall_after_verification": round(
+                totals["combined_tp_after_verification"] / expected_total, 4
+            ) if expected_total else 1.0,
             "failure_rate": round(
                 1 - totals["execution_successes"] / cases, 4
             ),

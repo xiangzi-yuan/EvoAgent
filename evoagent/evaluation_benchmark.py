@@ -6,7 +6,7 @@ from typing import Dict, List, Tuple
 from .diff_parser import ParsedDiff, parse_unified_diff
 from .evaluation_harness import RULE_TO_CWE
 from .models import Finding, Severity
-from .reviewer import Reviewer
+from .reviewer import Reviewer, suppress_contextual_false_positive
 
 
 class ContextRuleReviewer(Reviewer):
@@ -36,7 +36,10 @@ class ContextRuleReviewer(Reviewer):
         findings = []
         for line in parsed.added_lines:
             for rule_id, severity, pattern in self.RULES:
-                if not pattern.search(line.content):
+                if (
+                    not pattern.search(line.content)
+                    or suppress_contextual_false_positive(rule_id, line.content)
+                ):
                     continue
                 findings.append(Finding(
                     rule_id=rule_id,

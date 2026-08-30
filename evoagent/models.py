@@ -51,6 +51,8 @@ class Finding:
     call_chain: List[Dict[str, Any]] = field(default_factory=list)
     source: str = "unknown"
     gate: Dict[str, Any] = field(default_factory=dict)
+    original_rule_id: str = ""
+    disposition: str = "candidate"
 
     def to_dict(self) -> Dict[str, Any]:
         value = asdict(self)
@@ -65,6 +67,7 @@ class ReviewReport:
     summary: str
     risk: str
     findings: List[Finding] = field(default_factory=list)
+    suggestions: List[Finding] = field(default_factory=list)
     files_reviewed: List[str] = field(default_factory=list)
     reviewer: str = "local-rules"
     collaboration: Dict[str, Any] = field(default_factory=dict)
@@ -79,6 +82,7 @@ class ReviewReport:
             "summary": self.summary,
             "risk": self.risk,
             "findings": [item.to_dict() for item in self.findings],
+            "suggestions": [item.to_dict() for item in self.suggestions],
             "files_reviewed": self.files_reviewed,
             "reviewer": self.reviewer,
             "collaboration": self.collaboration,

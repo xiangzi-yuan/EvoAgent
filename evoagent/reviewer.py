@@ -8,7 +8,26 @@ from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional
 
 from .diff_parser import ParsedDiff
+from .finding_policy import normalize_rule_id
 from .models import Finding, Severity
+
+
+PLACEHOLDER_SECRET = re.compile(
+    r"(?i)(?:(?:^|[-_ .])(?:test|example|dummy|fake|placeholder|changeme|redacted)"
+    r"(?:$|[-_ .])|not[-_ ]?a[-_ ]?secret)"
+)
+
+
+def suppress_contextual_false_positive(rule_id: str, content: str) -> bool:
+    """Suppress narrow, auditable safe contexts that regex-only rules overmatch."""
+    if rule_id == "SEC-HARDCODED-SECRET":
+        literal = re.search(r"['\"]([^'\"]+)['\"]", content)
+        return bool(literal and PLACEHOLDER_SECRET.search(literal.group(1)))
+    if rule_id == "SEC-WEAK-HASH":
+        # Hashing a fixed literal is commonly a fixture/cache identifier, not a
+        # password or integrity boundary. Dynamic input remains reportable.
+        return bool(re.search(r"\bhashlib\.md5\s*\(\s*b?['\"]", content))
+    return False
 
 
 class Reviewer(ABC):
@@ -87,7 +106,11 @@ class LocalRuleReviewer(Reviewer):
             if line.path.endswith((".lock", ".min.js", ".map")):
                 continue
             for rule_id, severity, pattern, title, explanation, fix, test in self.RULES:
-                if pattern.search(line.content) and (rule_id, line.path, line.line) not in seen:
+                if (
+                    pattern.search(line.content)
+                    and not suppress_contextual_false_positive(rule_id, line.content)
+                    and (rule_id, line.path, line.line) not in seen
+                ):
                     seen.add((rule_id, line.path, line.line))
                     findings.append(
                         Finding(
@@ -131,7 +154,11 @@ class DomainRuleReviewer(Reviewer):
                 continue
             for rule_id, severity, pattern, title, explanation, fix, test in rules:
                 identity = (rule_id, line.path, line.line)
-                if pattern.search(line.content) and identity not in seen:
+                if (
+                    pattern.search(line.content)
+                    and not suppress_contextual_false_positive(rule_id, line.content)
+                    and identity not in seen
+                ):
                     seen.add(identity)
                     findings.append(Finding(
                         rule_id=rule_id, severity=severity, title=title,
@@ -259,9 +286,11 @@ class OpenAICompatibleReviewer(Reviewer):
                 severity = Severity(str(raw.get("severity", "medium")).lower())
             except ValueError:
                 severity = Severity.MEDIUM
+            original_rule_id = str(raw.get("rule_id", "LLM-OTHER"))[:160]
+            rule_id = normalize_rule_id(original_rule_id)
             findings.append(
                 Finding(
-                    rule_id=str(raw.get("rule_id", "LLM-REVIEW"))[:80],
+                    rule_id=rule_id,
                     severity=severity,
                     title=str(raw.get("title", "Review finding"))[:200],
                     explanation=str(raw.get("explanation", ""))[:2000],
@@ -271,6 +300,10 @@ class OpenAICompatibleReviewer(Reviewer):
                     fix=str(raw.get("fix", ""))[:2000],
                     test=str(raw.get("test", ""))[:2000],
                     confidence=max(0.0, min(1.0, float(raw.get("confidence", 0.7)))),
+                    source="single-llm",
+                    original_rule_id=(
+                        original_rule_id if original_rule_id != rule_id else ""
+                    ),
                 )
             )
         return findings

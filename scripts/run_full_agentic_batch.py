@@ -62,7 +62,7 @@ def load_results(path: str, allowed_ids: set) -> dict:
 def build_report(
     harness, selected: list, completed: dict, config: dict,
     token_budget: int, time_budget: int, timeout: int,
-    started: float, status: str,
+    started: float, status: str, source_dataset_sha256: str,
 ) -> dict:
     ordered = [completed[case["id"]] for case in selected if case["id"] in completed]
     totals = harness._empty_totals()
@@ -99,7 +99,8 @@ def build_report(
             "repositories": len({case["repository"] for case in selected}),
             "risk_cases": sum(bool(case["expected_findings"]) for case in selected),
             "clean_cases": sum(not case["expected_findings"] for case in selected),
-            "sha256": dataset_fingerprint(selected),
+            "source_sha256": source_dataset_sha256,
+            "selected_normalized_sha256": dataset_fingerprint(selected),
             "readiness": validate_real_dataset(selected),
         },
         "metrics": harness._metrics(totals),
@@ -142,6 +143,7 @@ def main() -> None:
     if not config:
         parser.error("a model provider must be configured")
     cases = load_jsonl(args.dataset)
+    source_dataset_sha256 = dataset_fingerprint(cases)
     for case in cases:
         for finding in case["expected_findings"]:
             finding.setdefault("should_comment", True)
@@ -162,7 +164,7 @@ def main() -> None:
     started = time.monotonic()
     save_report(output, build_report(
         harness, selected, completed, config, args.token_budget,
-        args.time_budget, args.timeout, started, "running",
+        args.time_budget, args.timeout, started, "running", source_dataset_sha256,
     ))
     for index, case in enumerate(selected, 1):
         if case["id"] in completed:
@@ -185,14 +187,15 @@ def main() -> None:
         completed[case["id"]] = result
         save_report(output, build_report(
             harness, selected, completed, config, args.token_budget,
-            args.time_budget, args.timeout, started, "running",
+            args.time_budget, args.timeout, started, "running", source_dataset_sha256,
         ))
         print(
-            "DONE %d/%d case=%s success=%s predicted=%d tp=%d fp=%d fn=%d "
-            "tokens=%d elapsed=%.1fs"
+            "DONE %d/%d case=%s success=%s predicted=%d suggestions=%d "
+            "tp=%d fp=%d fn=%d tokens=%d elapsed=%.1fs"
             % (
                 index, len(selected), case["id"], result["execution_success"],
-                result["predicted"], result["tp"], result["fp"], result["fn"],
+                result["predicted"], result.get("suggestions", 0),
+                result["tp"], result["fp"], result["fn"],
                 result["total_tokens"], time.monotonic() - case_started,
             ),
             flush=True,
@@ -201,7 +204,7 @@ def main() -> None:
             print("ERROR case=%s %s" % (case["id"], result["error"]), flush=True)
     save_report(output, build_report(
         harness, selected, completed, config, args.token_budget,
-        args.time_budget, args.timeout, started, "complete",
+        args.time_budget, args.timeout, started, "complete", source_dataset_sha256,
     ))
     print("COMPLETE %s" % output, flush=True)
 

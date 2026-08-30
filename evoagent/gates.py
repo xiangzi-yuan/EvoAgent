@@ -1,8 +1,14 @@
 """Deterministic finding and release gates shared by all run modes."""
 from dataclasses import dataclass
-from typing import Any, Dict, Iterable, List, Tuple
+from typing import Any, Dict, Iterable, List
 
 from .diff_parser import ParsedDiff
+from .finding_policy import (
+    is_deterministic_finding,
+    is_validated_agent_skill_finding,
+    normalize_rule_id,
+    repository_evidence_refs,
+)
 from .models import Finding, Severity
 
 
@@ -17,6 +23,7 @@ class FindingGate:
     STRONG_EVIDENCE_TOOLS = {
         "ast_analyze", "symbol", "git_context", "run_scanners",
         "semgrep", "bandit", "eslint", "typecheck", "test", "diff-ast-analyze",
+        "local-rule-scanner", "declarative-scanner",
     }
 
     def __init__(self, minimum_confidence: float = 0.55):
@@ -28,6 +35,10 @@ class FindingGate:
         counters = {"format": 0, "evidence": 0, "confidence": 0, "release": 0}
         for finding in findings:
             reasons = []
+            original_rule_id = finding.rule_id
+            finding.rule_id = normalize_rule_id(finding.rule_id)
+            if finding.rule_id != original_rule_id and not finding.original_rule_id:
+                finding.original_rule_id = original_rule_id
             location = (finding.path, finding.line)
             if (
                 location not in valid_locations or not finding.rule_id.strip()
@@ -45,14 +56,19 @@ class FindingGate:
                 item for item in valid_refs
                 if str(item.get("tool")) in self.STRONG_EVIDENCE_TOOLS
             ]
+            repository_refs = repository_evidence_refs(finding)
+            trusted_source = (
+                is_deterministic_finding(finding)
+                or is_validated_agent_skill_finding(finding)
+            )
             if not exact_line and not valid_refs and not finding.call_chain:
                 reasons.append("evidence gate: no matching code, call chain or tool evidence")
                 counters["evidence"] += 1
-            if finding.severity in {Severity.CRITICAL, Severity.HIGH} and not (
-                strong_refs or finding.call_chain
+            if finding.severity in {Severity.CRITICAL, Severity.HIGH} and not strong_refs and not (
+                trusted_source and finding.call_chain
             ):
                 reasons.append(
-                    "evidence gate: high-risk finding requires AST/scanner/call-chain evidence"
+                    "evidence gate: high-risk finding requires verified scanner or tool evidence"
                 )
                 counters["evidence"] += 1
             if finding.confidence < self.minimum_confidence:
@@ -63,18 +79,26 @@ class FindingGate:
             ):
                 reasons.append("release gate: high-risk finding lacks fix or test guidance")
                 counters["release"] += 1
+            elif not trusted_source and (not finding.fix.strip() or not finding.test.strip()):
+                reasons.append("release gate: LLM finding lacks fix or test guidance")
+                counters["release"] += 1
 
             finding.gate = {
                 "passed": not reasons, "reasons": reasons,
                 "exact_location_evidence": exact_line,
                 "strong_evidence_count": len(strong_refs),
+                "repository_evidence_count": len(repository_refs),
             }
             if reasons:
+                finding.disposition = "rejected"
                 rejected.append({
                     "rule_id": finding.rule_id, "path": finding.path,
-                    "line": finding.line, "reasons": reasons,
+                    "line": finding.line, "source": finding.source,
+                    "original_rule_id": finding.original_rule_id,
+                    "reasons": reasons,
                 })
             else:
+                finding.disposition = "confirmed"
                 accepted.append(finding)
         return GateResult(
             accepted, rejected,

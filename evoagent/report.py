@@ -57,8 +57,11 @@ def to_markdown(report: Dict[str, Any]) -> str:
             "- Protocol: `%s`" % collaboration.get("protocol", "unknown"),
             "- Actual roles: `%s`" % ", ".join(collaboration.get("roles") or []),
             "- Candidate findings: `%s`; critic decisions: `%s`" % (
-                collaboration.get("candidate_findings", 0),
+                collaboration.get("candidate_findings_before_critic", 0),
                 len(collaboration.get("critic_decisions") or []),
+            ),
+            "- Confirmed findings: `%s`; unverified suggestions withheld: `%s`" % (
+                len(report.get("findings") or []), len(report.get("suggestions") or []),
             ),
             "",
         ])

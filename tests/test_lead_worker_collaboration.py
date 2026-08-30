@@ -84,6 +84,10 @@ class HierarchicalClient:
                 "action": "final", "decisions": [
                     {
                         "finding_index": index, "accepted": True,
+                        "introduced_by_diff": True,
+                        "reproducible": True,
+                        "evidence_sufficient": True,
+                        "would_comment_on_real_pr": True,
                         "objections": [], "confidence_adjustment": 0.0,
                     }
                     for index, _item in enumerate(task["candidates"])
@@ -116,7 +120,12 @@ class LeadWorkerCollaborationTests(unittest.TestCase):
         )
         summary = reviewer.collaboration_summary("task")
 
-        self.assertIn("SEC-LEAD-REVISION", {item.rule_id for item in findings})
+        self.assertNotIn("SEC-LEAD-REVISION", {item.rule_id for item in findings})
+        self.assertIn(
+            "SEC-LEAD-REVISION",
+            {item["rule_id"] for item in summary["suggested_findings"]},
+        )
+        self.assertIn("SEC-EVAL", {item.rule_id for item in findings})
         self.assertEqual("lead-workers", summary["collaboration"]["protocol"])
         self.assertEqual(2, client.security_calls)
         self.assertEqual(1, len(summary["collaboration"]["revision_results"]))
@@ -145,7 +154,12 @@ class LeadWorkerCollaborationTests(unittest.TestCase):
             "task", DIFF, parse_unified_diff(DIFF), "org/repo"
         )
 
-        self.assertIn("SEC-LEAD-REVISION", {item.rule_id for item in findings})
+        summary = resumed.collaboration_summary("task")
+        self.assertNotIn("SEC-LEAD-REVISION", {item.rule_id for item in findings})
+        self.assertIn(
+            "SEC-LEAD-REVISION",
+            {item["rule_id"] for item in summary["suggested_findings"]},
+        )
         self.assertEqual([], resumed_client.calls)
         self.assertGreater(
             resumed.collaboration_summary("task")["execution"]["llm_calls"], 0
@@ -157,9 +171,11 @@ class LeadWorkerCollaborationTests(unittest.TestCase):
 
         reviewer.review_with_context("task", DIFF, parse_unified_diff(DIFF), "org/repo")
 
-        episodes = memory.recall("default", "org/repo", "SEC-LEAD-REVISION")
+        episodes = memory.recall("default", "org/repo", "SEC-EVAL")
         self.assertTrue(any(item["kind"] == "finding_approved" for item in episodes))
         self.assertTrue(any(item["kind"] == "task_summary" for item in episodes))
+        unverified = memory.recall("default", "org/repo", "SEC-LEAD-REVISION")
+        self.assertFalse(any(item["kind"] == "finding_approved" for item in unverified))
 
 
 if __name__ == "__main__":

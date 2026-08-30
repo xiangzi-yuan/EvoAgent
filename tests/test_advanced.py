@@ -284,8 +284,13 @@ class AdvancedFeatureTests(unittest.TestCase):
             time.sleep(0.02)
         service.queue.close()
         self.assertEqual("SUCCESS", task["state"])
-        self.assertEqual({"SEC-EVAL", "QUALITY-UNFINISHED"},
-                         {item["rule_id"] for item in task["report"]["findings"]})
+        self.assertEqual(
+            {"SEC-EVAL"}, {item["rule_id"] for item in task["report"]["findings"]}
+        )
+        self.assertIn(
+            "QUALITY-UNFINISHED",
+            {item["rule_id"] for item in task["report"]["suggestions"]},
+        )
 
 
 if __name__ == "__main__":

@@ -83,6 +83,7 @@ class SkillAwareClient:
                     "path": "a.py", "line": 1, "evidence": "dangerous_call(data)",
                     "fix": "Use safe_call instead.", "test": "Add a regression test.",
                     "confidence": .9,
+                    "skill": "review-dangerous-calls",
                     "call_chain": [{"path": "a.py", "line": 1, "symbol": "dangerous_call"}],
                 }]}
             return {"action": "final", "findings": []}

@@ -117,6 +117,9 @@
                   <input name="pull_request" type="number" min="1" placeholder="例如 42">
                 </label>
               </div>
+              <label>仓库本地路径 <span class="optional">建议填写，用于跨文件逻辑审查</span>
+                <input name="repository_root" placeholder="例如 D:\work\repository；Docker 中填写容器内只读挂载路径" autocomplete="off">
+              </label>
               <label>运行模式
                 <select name="mode" id="review-mode">
                   <option value="agentic">agentic · 四个真实 LLM 角色</option>
