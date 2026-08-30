@@ -60,6 +60,7 @@ REPOSITORY_EVIDENCE_TOOLS = frozenset({
     "git_context",
     "run_scanners",
     "run_repository_checks",
+    "semantic_probe",
     "semgrep",
     "bandit",
     "eslint",
@@ -124,6 +125,12 @@ def _repository_evidence_has_facts(item: dict) -> bool:
         )
     if tool == "ast_analyze":
         return isinstance(payload, dict) and payload.get("valid") is True
+    if tool == "semantic_probe":
+        return (
+            isinstance(payload, dict)
+            and bool(payload.get("kind"))
+            and payload.get("arbitrary_code_executed") is False
+        )
     if tool == "git_context":
         return (
             isinstance(payload, dict)

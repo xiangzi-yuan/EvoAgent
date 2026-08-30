@@ -163,6 +163,28 @@ python scripts/run_real_pr_benchmark.py output/real-pr-10.jsonl --minimum 10
 
 正式对照实验应对同一批案例分别移除和保留 `repository_root`，比较“仅 Diff”与“Diff + 完整仓库 + 四角色工具”的召回、误报、成本和延迟，不能用两批不同 PR 横向比较。
 
+### 公开 Review 证据的 10 PR 诊断集
+
+`benchmarks/real_pr_review_labels.jsonl` 绑定了 10 个公开 Python 仓库中的成员/协作者 Review 评论、评论发生时的 commit、变更行和人工 CWE 分类。checkout、导入与门禁命令如下：
+
+```powershell
+python scripts/prepare_review_checkouts.py benchmarks/real_pr_review_labels.jsonl --cache-root output/real-pr-repositories --checkout-root output/real-pr-checkouts
+python scripts/import_github_review_dataset.py benchmarks/real_pr_review_labels.jsonl output/real-pr-reviewed-10.jsonl --checkout-root output/real-pr-checkouts
+python scripts/run_real_pr_benchmark.py output/real-pr-reviewed-10.jsonl --minimum 10
+```
+
+匿名 GitHub API 达到限额时，可以复用之前已经核验过的证据；本地 HEAD、base commit、路径、行号和 diff 仍会重新校验：
+
+```powershell
+python scripts/import_github_review_dataset.py benchmarks/real_pr_review_labels.jsonl output/real-pr-reviewed-10-v2.jsonl --checkout-root output/real-pr-checkouts --reuse-evidence-from output/real-pr-reviewed-10.jsonl
+```
+
+这批标签的完整性是 `targeted-review-comments`：每条标签证明一个 Reviewer 确实指出的问题，但不声称穷举 PR 中全部问题。因此未命中的额外 Finding 计入 `formal_unjudged_findings`，人工判定前不能称为误报，也不能用它估计 Precision。
+
+首轮 DeepSeek 四角色诊断执行成功率为 100%，目标 Review 召回 1/10；14 条规则为 0/10。对 Sphinx #14366 做同案例修复前后对照时，Worker 原本找到了问题但 Critic 因缺乏可执行证据拒绝；加入固定、无网络、不可执行任意代码的 URL 规范化探针后，系统在第 405 行发布了有证据的 Finding，命中公开 Review。这个单例对照证明语义探针有效，但不是 10 条全量重跑结果。机器可读的诊断摘要见 `benchmarks/real_pr_review_pilot.json`。
+
+当前剩余瓶颈已经可以区分：任务分解层会强制所有生产源码至少交给 Correctness Worker；对于 SQLModel `model_dump()` 与 `Field(exclude=True)` 这类第三方库语义，模型即使读到正确源码仍可能判断错误，下一阶段需要版本化 Agent Skill 或管理员配置的回归测试，而不是继续放宽发布门禁。
+
 项目启动时会自动读取项目根目录的 `.env`，也兼容 `evoagent/.env`；系统环境变量优先于 `.env` 文件。推荐将以下内容写入根目录 `.env`（该文件已被 `.gitignore` 忽略）：
 
 ```env

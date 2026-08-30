@@ -53,8 +53,12 @@ class RealPrImportTests(unittest.TestCase):
         }
         with tempfile.TemporaryDirectory() as root:
             os.mkdir(os.path.join(root, "repo-head123"))
-            case = build_case(item, root)
+            case = build_case(item, root, cached_comments={11: fetch.return_value})
+        fetch.assert_not_called()
         self.assertEqual("public-github-review-comment", case["source"]["label_kind"])
+        self.assertEqual(
+            "targeted-review-comments", case["source"]["label_completeness"]
+        )
         self.assertEqual("MEMBER", case["source"]["review_evidence"][0]["author_association"])
         self.assertEqual("head123", case["source"]["head_sha"])
 

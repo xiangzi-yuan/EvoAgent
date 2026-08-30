@@ -62,7 +62,9 @@ def _review_line(comment: dict) -> int:
     return int(value)
 
 
-def build_case(item: dict, checkout_root: str, token: str = "") -> dict:
+def build_case(
+    item: dict, checkout_root: str, token: str = "", cached_comments=None,
+) -> dict:
     for field in (
         "id", "repository", "pull_request", "split", "base_sha",
         "snapshot_sha", "checkout", "expected_findings",
@@ -93,7 +95,9 @@ def build_case(item: dict, checkout_root: str, token: str = "") -> dict:
             raise ValueError("every expected finding requires review_comment_id")
         if comment_id in evidence:
             raise ValueError("review_comment_id cannot label multiple findings")
-        comment = fetch_review_comment(repository, comment_id, token)
+        comment = dict((cached_comments or {}).get(comment_id) or {})
+        if not comment:
+            comment = fetch_review_comment(repository, comment_id, token)
         association = str(comment.get("author_association", "")).upper()
         if association not in TRUSTED_ASSOCIATIONS:
             raise ValueError(
@@ -146,6 +150,7 @@ def build_case(item: dict, checkout_root: str, token: str = "") -> dict:
         "source": {
             "kind": "public-github-pr",
             "label_kind": "public-github-review-comment",
+            "label_completeness": "targeted-review-comments",
             "public_url": "https://github.com/%s/pull/%d" % (repository, pull_request),
             "base_sha": base_sha,
             "head_sha": snapshot_sha,
@@ -165,8 +170,36 @@ def main() -> None:
     parser.add_argument("manifest")
     parser.add_argument("output")
     parser.add_argument("--checkout-root", required=True)
+    parser.add_argument(
+        "--reuse-evidence-from", default="",
+        help="Reuse review evidence from a previously GitHub-verified dataset.",
+    )
     args = parser.parse_args()
     token = os.environ.get("GITHUB_TOKEN", "")
+    cached_comments = {}
+    if args.reuse_evidence_from:
+        with open(args.reuse_evidence_from, "r", encoding="utf-8") as handle:
+            for raw in handle:
+                if not raw.strip():
+                    continue
+                prior = json.loads(raw)
+                repository = str(prior.get("repository", ""))
+                pull_request = int(prior.get("pull_request", 0) or 0)
+                for evidence in (prior.get("source") or {}).get("review_evidence") or []:
+                    comment_id = int(evidence.get("comment_id", 0) or 0)
+                    if comment_id:
+                        cached_comments[comment_id] = {
+                            "author_association": evidence.get("author_association"),
+                            "body": evidence.get("body", ""),
+                            "html_url": evidence.get("html_url", ""),
+                            "original_commit_id": evidence.get("snapshot_sha", ""),
+                            "original_line": evidence.get("line"),
+                            "path": evidence.get("path", ""),
+                            "pull_request_url": (
+                                "https://api.github.com/repos/%s/pulls/%d"
+                                % (repository, pull_request)
+                            ),
+                        }
     records = []
     with open(args.manifest, "r", encoding="utf-8") as handle:
         for line_number, raw in enumerate(handle, 1):
@@ -174,7 +207,7 @@ def main() -> None:
                 continue
             try:
                 records.append(build_case(
-                    json.loads(raw), args.checkout_root, token,
+                    json.loads(raw), args.checkout_root, token, cached_comments,
                 ))
             except Exception as exc:
                 raise ValueError("manifest line %d: %s" % (line_number, exc)) from exc

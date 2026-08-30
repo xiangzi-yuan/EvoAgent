@@ -56,7 +56,7 @@ def load_results(path: str, allowed_ids: set) -> dict:
     return {
         item["id"]: item
         for item in report.get("case_results", [])
-        if item.get("id") in allowed_ids
+        if item.get("id") in allowed_ids and item.get("execution_success") is True
     }
 
 

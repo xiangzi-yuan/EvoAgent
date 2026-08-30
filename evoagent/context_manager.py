@@ -319,6 +319,10 @@ class ContextManager:
             )
         if estimate_tokens(managed) > hard_input_limit:
             managed["context_policy"] = {"input_token_limit": hard_input_limit}
+        if estimate_tokens(managed) > hard_input_limit:
+            managed["available_tools"] = self._compact_tool_catalog(
+                managed["available_tools"]
+            )
         # Budget estimates include the envelope itself. Under severe pressure the
         # two advisory counters are less valuable than repository evidence, diff
         # metadata, candidate indices, and recalled-memory provenance.
@@ -333,6 +337,24 @@ class ContextManager:
             "observations": observation_stats,
         }
         return managed, stats
+
+    @staticmethod
+    def _compact_tool_catalog(tools: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Keep callable names and argument contracts while dropping prose metadata."""
+        compact = []
+        for raw in tools:
+            parameters = dict(raw.get("parameters") or {})
+            properties = {}
+            for name, value in (parameters.get("properties") or {}).items():
+                spec = {"type": value.get("type", "string")}
+                if value.get("enum"):
+                    spec["enum"] = list(value["enum"])
+                properties[name] = spec
+            schema = {"type": "object", "properties": properties}
+            if parameters.get("required"):
+                schema["required"] = list(parameters["required"])
+            compact.append({"name": str(raw.get("name", "")), "parameters": schema})
+        return compact
 
     def output_token_limit(self, system_prompt: str, requested: int) -> int:
         """Reserve enough of the configured window for a minimally useful input."""

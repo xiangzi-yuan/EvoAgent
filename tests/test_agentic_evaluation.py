@@ -2,8 +2,9 @@ import json
 import unittest
 
 from evoagent.diff_parser import parse_unified_diff
-from evoagent.agentic_core import BoundedRole
+from evoagent.agentic_core import BoundedRole, ModeRouterReviewer
 from evoagent.evaluation_benchmark import ContextRuleReviewer
+from evoagent.evaluation_harness import one_to_one_match
 from evoagent.evaluation_v2 import (
     FairAblationSuite,
     ProductArmReviewer,
@@ -12,6 +13,7 @@ from evoagent.evaluation_v2 import (
 )
 from evoagent.models import Finding, Severity
 from evoagent.reviewer import LocalRuleReviewer
+from evoagent.repository_tools import RepositoryToolSuite
 from evoagent.runtime import AgentTool, ToolRegistry
 from evoagent.telemetry import ExecutionLedger
 
@@ -87,6 +89,107 @@ class FakeClient:
 
 
 class AgenticEvaluationTests(unittest.TestCase):
+    def test_repository_preflight_prioritizes_semantic_source_over_config(self):
+        class RecordingTools:
+            def __init__(self):
+                self.calls = []
+
+            def names(self):
+                return [
+                    "read_file", "search_repository", "semantic_probe", "ast_analyze",
+                ]
+
+            def invoke(self, name, arguments):
+                self.calls.append((name, dict(arguments)))
+                return {
+                    "evidence_id": "%s:%d" % (name, len(self.calls)),
+                    "tool": name, "output": dict(arguments),
+                }
+
+        parsed = parse_unified_diff(
+            "--- a/.github/workflow.yml\n+++ b/.github/workflow.yml\n"
+            "@@ -0,0 +1 @@\n+name: build\n"
+            "--- a/src/app.py\n+++ b/src/app.py\n"
+            "@@ -99,0 +100 @@\n+message = str(err).replace(inv_location, safe_url)\n"
+        )
+        tools = RecordingTools()
+
+        observations = ModeRouterReviewer._repository_preflight(
+            {"files": parsed.files}, parsed, tools,
+        )
+
+        self.assertTrue(observations)
+        self.assertEqual("read_file", tools.calls[0][0])
+        self.assertEqual("src/app.py", tools.calls[0][1]["path"])
+        queries = [
+            arguments["query"] for name, arguments in tools.calls
+            if name == "search_repository"
+        ]
+        self.assertIn("inv_location", queries)
+        self.assertIn(
+            ("semantic_probe", {"kind": "url-normalization-redaction"}), tools.calls
+        )
+
+    def test_url_normalization_probe_demonstrates_exact_replacement_gap(self):
+        evidence = RepositoryToolSuite.semantic_probe("url-normalization-redaction")
+        output = evidence["output"]
+
+        self.assertFalse(output["exact_original_still_matches"])
+        self.assertTrue(output["credentials_remaining"])
+        self.assertFalse(output["network_used"])
+        self.assertFalse(output["arbitrary_code_executed"])
+
+    def test_expected_finding_can_declare_review_taxonomy_aliases(self):
+        finding = Finding(
+            rule_id="CWE-200", severity=Severity.HIGH,
+            title="Leak", explanation="Credentials remain visible.",
+            path="app.py", line=5, evidence="replace(raw, safe)",
+            fix="Redact normalized values.", test="Use an encoded password.",
+        )
+        expected = [{
+            "cwe": "CWE-532", "acceptable_cwes": ["CWE-200", "CWE-522"],
+            "path": "app.py", "start_line": 5, "end_line": 5,
+            "severity": "high",
+        }]
+
+        self.assertEqual(1, len(one_to_one_match(expected, [finding])))
+
+    def test_same_semantic_probe_and_location_are_deduplicated_across_roles(self):
+        values = [
+            Finding(
+                rule_id=rule_id, severity=Severity.HIGH,
+                title="Credential leak", explanation="Normalized URL leaks a password.",
+                path="app.py", line=5, evidence="replace(raw, safe)",
+                evidence_refs=[{
+                    "evidence_id": "semantic_probe:test", "tool": "semantic_probe",
+                    "output": {"kind": "url-normalization-redaction",
+                               "arbitrary_code_executed": False},
+                }],
+                fix="Redact normalized values.", test="Use an encoded password.",
+                source=source,
+            )
+            for rule_id, source in (
+                ("CWE-200", "security"),
+                ("CWE-522", "correctness-reliability"),
+            )
+        ]
+
+        self.assertEqual(1, len(ModeRouterReviewer._merge(values)))
+
+    def test_delegation_coverage_gate_assigns_every_production_source(self):
+        delegations = ModeRouterReviewer._normalize_delegations(
+            [{
+                "assignment_id": "correctness-1",
+                "worker": "correctness-reliability",
+                "files": ["uv.lock"],
+            }],
+            {"correctness-reliability"},
+            ["uv.lock", ".github/workflow.yml", "sqlmodel/main.py", "tests/test_main.py"],
+        )
+
+        self.assertIn("sqlmodel/main.py", delegations[0]["files"])
+        self.assertNotIn("tests/test_main.py", delegations[0]["files"])
+
     def test_repository_role_cannot_finish_before_a_factual_tool_call(self):
         class SequencedClient:
             def __init__(self):
@@ -160,6 +263,48 @@ class AgenticEvaluationTests(unittest.TestCase):
         self.assertEqual(1.0, metrics["missed_finding_recovery_rate"])
         self.assertEqual(1.0, metrics["combined_recall_after_verification"])
         self.assertEqual(1.0, metrics["suggestion_utility_rate"])
+
+    def test_targeted_review_labels_do_not_call_unmatched_findings_invalid(self):
+        finding = Finding(
+            rule_id="CWE-754", severity=Severity.MEDIUM,
+            title="Unexpected issue", explanation="A separate review candidate.",
+            path="app.py", line=2, evidence="other()",
+            fix="Fix it.", test="Test it.",
+        )
+
+        class FormalReviewer:
+            name = "formal"
+
+            def review_case(self, _case, _parsed):
+                return [finding]
+
+        case = {
+            "id": "targeted", "repository": "repo", "pull_request": 1,
+            "split": "validation",
+            "source": {
+                "kind": "public-github-pr",
+                "label_completeness": "targeted-review-comments",
+            },
+            "diff": (
+                "--- a/app.py\n+++ b/app.py\n@@ -0,0 +1,2 @@\n"
+                "+expected()\n+other()\n"
+            ),
+            "expected_findings": [{
+                "path": "app.py", "start_line": 1, "end_line": 1,
+                "cwe": "CWE-476", "severity": "high", "should_comment": True,
+            }],
+        }
+
+        metrics = ProductionEvaluationHarness().run(
+            FormalReviewer(), [case], "targeted"
+        )["metrics"]
+        self.assertEqual(0, metrics["formal_invalid_findings"])
+        self.assertEqual(1, metrics["formal_unjudged_findings"])
+        self.assertEqual(0.0, metrics["invalid_comments_per_pr"])
+        self.assertEqual(
+            "not-estimable-until-unexpected-findings-are-adjudicated",
+            metrics["precision_interpretation"],
+        )
 
     def test_suggestion_utility_uses_only_adjudicated_optional_and_invalid_labels(self):
         suggestions = [

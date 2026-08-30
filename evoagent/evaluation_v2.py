@@ -60,7 +60,7 @@ def validate_real_dataset(cases: List[dict], minimum_cases: int = 300) -> Dict[s
         "public-github-pr", "private-historical-pr",
     }) and bool(source_kinds)
     gates = {
-        "minimum_300_cases": len(cases) >= minimum_cases,
+        "minimum_cases": len(cases) >= minimum_cases,
         "real_provenance": public_or_historical,
         "repository_isolation": not overlaps,
         "train_present": bool(repositories_by_split.get("train")),
@@ -69,6 +69,7 @@ def validate_real_dataset(cases: List[dict], minimum_cases: int = 300) -> Dict[s
     }
     return {
         "ready": all(gates.values()), "gates": gates, "cases": len(cases),
+        "minimum_required": int(minimum_cases),
         "repositories": len({str(case.get("repository")) for case in cases}),
         "repositories_by_split": {
             key: len(value) for key, value in repositories_by_split.items()
@@ -250,6 +251,12 @@ class ProductionEvaluationHarness(EndToEndEvaluationHarness):
                 continue
         return findings
 
+    @staticmethod
+    def _targeted_labels(case):
+        return str((case.get("source") or {}).get("label_completeness", "")) == (
+            "targeted-review-comments"
+        )
+
     @classmethod
     def _suggestion_judgments(cls, case):
         judgments = []
@@ -383,7 +390,9 @@ class ProductionEvaluationHarness(EndToEndEvaluationHarness):
 
     def rescore_suggestions(self, result, case):
         """Re-score cached model output after adding human judgments, without new calls."""
-        findings = self._restore_findings(result.get("predicted_findings") or [])
+        findings = ModeRouterReviewer._merge(
+            self._restore_findings(result.get("predicted_findings") or [])
+        )
         suggestions = self._restore_findings(result.get("suggested_findings") or [])
         return self._score_suggestions(result, case, findings, suggestions)
 
@@ -393,9 +402,13 @@ class ProductionEvaluationHarness(EndToEndEvaluationHarness):
             item for item in case["expected_findings"]
             if bool(item.get("should_comment", True))
         ]
-        findings = self._restore_findings(result.get("predicted_findings") or [])
+        findings = ModeRouterReviewer._merge(
+            self._restore_findings(result.get("predicted_findings") or [])
+        )
         suggestions = self._restore_findings(result.get("suggested_findings") or [])
         matches = one_to_one_match(expected, findings, self.line_tolerance)
+        targeted = self._targeted_labels(case)
+        unmatched = len(findings) - len(matches)
         result.update({
             "expected": len(expected),
             "predicted": len(findings),
@@ -412,7 +425,12 @@ class ProductionEvaluationHarness(EndToEndEvaluationHarness):
             "expected_findings": expected,
             "predicted_findings": [item.to_dict() for item in findings],
             "matches": [],
-            "invalid_comments": len(findings) - len(matches),
+            "invalid_comments": 0 if targeted else unmatched,
+            "formal_invalid_findings": 0 if targeted else unmatched,
+            "formal_unjudged_findings": unmatched if targeted else 0,
+            "label_completeness": (
+                "targeted-review-comments" if targeted else "exhaustive-or-unspecified"
+            ),
             "exact_location_hits": 0,
             "evidence_hits": 0,
             # Cached repair evidence is tied to the old truth set and cannot be
@@ -469,8 +487,15 @@ class ProductionEvaluationHarness(EndToEndEvaluationHarness):
         recording = RecordingReviewer(reviewer)
         started = time.monotonic()
         result = super()._run_case(recording, case)
+        targeted = self._targeted_labels(case)
+        unmatched = int(result.get("fp", 0) or 0)
         result.update({
-            "invalid_comments": result["fp"],
+            "invalid_comments": 0 if targeted else unmatched,
+            "formal_invalid_findings": 0 if targeted else unmatched,
+            "formal_unjudged_findings": unmatched if targeted else 0,
+            "label_completeness": (
+                "targeted-review-comments" if targeted else "exhaustive-or-unspecified"
+            ),
             "exact_location_hits": 0,
             "evidence_hits": 0,
             "accepted_comments": int(case.get("accepted_comments", 0) or 0),
@@ -558,6 +583,8 @@ class ProductionEvaluationHarness(EndToEndEvaluationHarness):
             "incremental_suggestion_tp": 0,
             "combined_tp_after_verification": 0,
             "clean_cases_without_suggestions": 0,
+            "formal_invalid_findings": 0, "formal_unjudged_findings": 0,
+            "targeted_label_cases": 0,
         })
         return values
 
@@ -574,8 +601,12 @@ class ProductionEvaluationHarness(EndToEndEvaluationHarness):
             "suggestion_invalid", "suggestion_duplicate", "suggestion_unjudged",
             "suggestion_adjudicated", "suggestion_useful",
             "incremental_suggestion_tp", "combined_tp_after_verification",
+            "formal_invalid_findings", "formal_unjudged_findings",
         ):
             totals[field] += int(result.get(field, 0))
+        totals["targeted_label_cases"] += int(
+            result.get("label_completeness") == "targeted-review-comments"
+        )
         totals["clean_cases_without_suggestions"] += int(
             result.get("expected", 0) == 0 and result.get("suggestions", 0) == 0
         )
@@ -604,6 +635,20 @@ class ProductionEvaluationHarness(EndToEndEvaluationHarness):
             "average_output_tokens_per_pr": round(totals["output_tokens"] / cases, 2),
             "average_total_tokens_per_pr": round(totals["total_tokens"] / cases, 2),
             "average_suggestions_per_pr": round(totals["suggestions"] / cases, 4),
+            "formal_invalid_findings": totals["formal_invalid_findings"],
+            "formal_unjudged_findings": totals["formal_unjudged_findings"],
+            "formal_adjudication_coverage": round(
+                (totals["tp"] + totals["formal_invalid_findings"])
+                / max(1, totals["tp"] + totals["formal_invalid_findings"]
+                      + totals["formal_unjudged_findings"]), 4
+            ),
+            "precision_interpretation": (
+                "not-estimable-until-unexpected-findings-are-adjudicated"
+                if totals["targeted_label_cases"] else "exhaustive-labels"
+            ),
+            "targeted_review_recall": round(
+                totals["tp"] / expected_total, 4
+            ) if expected_total else 1.0,
             "suggestion_utility_rate": round(
                 totals["suggestion_useful"] / totals["suggestion_adjudicated"], 4
             ) if totals["suggestion_adjudicated"] else None,

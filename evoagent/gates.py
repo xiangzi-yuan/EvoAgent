@@ -24,6 +24,7 @@ class FindingGate:
         "ast_analyze", "symbol", "git_context", "run_scanners",
         "semgrep", "bandit", "eslint", "typecheck", "test", "diff-ast-analyze",
         "local-rule-scanner", "declarative-scanner",
+        "semantic_probe",
     }
 
     def __init__(self, minimum_confidence: float = 0.55):

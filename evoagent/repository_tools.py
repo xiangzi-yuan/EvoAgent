@@ -12,6 +12,7 @@ import tempfile
 import shlex
 import time
 from typing import Any, Dict, Iterable, List, Optional, Set
+from urllib.parse import urlsplit, urlunsplit
 
 from .diff_parser import ParsedDiff
 from .runtime import AgentTool, ToolRegistry
@@ -250,6 +251,55 @@ class RepositoryToolSuite:
             "note": "Tree-sitter is not installed; non-Python AST analysis is unavailable.",
         })
 
+    @staticmethod
+    def semantic_probe(kind: str) -> dict:
+        """Run a fixed, side-effect-free language or data-transformation probe."""
+        kind = str(kind).strip().lower()
+        if kind == "url-normalization-redaction":
+            original = "http://user:s%7Eecret@example.invalid/objects.inv"
+            unreserved = frozenset(
+                "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~"
+            )
+
+            def normalize_match(match):
+                character = chr(int(match.group(0)[1:], 16))
+                return character if character in unreserved else match.group(0).upper()
+
+            normalized = re.sub(r"%[0-9A-Fa-f]{2}", normalize_match, original)
+            parts = urlsplit(original)
+            safe = urlunsplit((parts.scheme, parts.hostname or "", parts.path,
+                               parts.query, parts.fragment))
+            replaced = normalized.replace(original, safe)
+            remaining = urlsplit(replaced)
+            payload = {
+                "kind": kind,
+                "operation": "normalize-unreserved-then-exact-string-replace",
+                "original": original,
+                "normalized": normalized,
+                "redacted_original": safe,
+                "replacement_result": replaced,
+                "exact_original_still_matches": original in normalized,
+                "credentials_remaining": bool(
+                    remaining.username is not None or remaining.password is not None
+                ),
+                "network_used": False,
+                "arbitrary_code_executed": False,
+            }
+            return _evidence("semantic_probe", payload)
+        if kind == "tri-state-boolean":
+            return _evidence("semantic_probe", {
+                "kind": kind,
+                "values": [
+                    {"value": repr(value), "not_value": not value,
+                     "is_false": value is False}
+                    for value in (None, False, True)
+                ],
+                "arbitrary_code_executed": False,
+            })
+        raise ValueError(
+            "kind must be url-normalization-redaction or tri-state-boolean"
+        )
+
     def git_context(self, path: str, line: int = 1) -> dict:
         target = self._safe_path(path)
         if not os.path.isdir(os.path.join(self.root, ".git")) or not shutil.which("git"):
@@ -397,6 +447,21 @@ class RepositoryToolSuite:
                 "Parse source and return AST facts.",
                 {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"], "additionalProperties": False},
                 self.ast_analyze,
+            ),
+            "semantic_probe": (
+                "Run a fixed side-effect-free semantic counterexample probe; no arbitrary code or network.",
+                {
+                    "type": "object",
+                    "properties": {
+                        "kind": {
+                            "type": "string",
+                            "enum": ["url-normalization-redaction", "tri-state-boolean"],
+                        }
+                    },
+                    "required": ["kind"],
+                    "additionalProperties": False,
+                },
+                self.semantic_probe,
             ),
             "git_context": (
                 "Read nearby Git history and blame context.",

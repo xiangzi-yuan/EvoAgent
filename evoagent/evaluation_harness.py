@@ -100,6 +100,11 @@ def validate_case(case: dict, line_number: int = 0) -> None:
                 raise ValueError("%s finding is missing %s" % (prefix, field))
         if str(expected["severity"]).lower() not in SEVERITY_RANK:
             raise ValueError("%s finding has invalid severity" % prefix)
+        acceptable_cwes = expected.get("acceptable_cwes") or []
+        if not isinstance(acceptable_cwes, list) or not all(
+            str(value).upper().startswith("CWE-") for value in acceptable_cwes
+        ):
+            raise ValueError("%s finding has invalid acceptable_cwes" % prefix)
         if int(expected["start_line"]) > int(expected["end_line"]):
             raise ValueError("%s finding has an inverted line range" % prefix)
         expected_path = _normalized_path(str(expected["path"]))
@@ -124,13 +129,16 @@ def _candidate_edges(
         start = int(truth["start_line"])
         end = int(truth["end_line"])
         truth_path = _normalized_path(str(truth["path"]))
-        truth_cwe = str(truth["cwe"]).upper()
+        truth_cwes = {
+            str(value).upper()
+            for value in [truth["cwe"], *(truth.get("acceptable_cwes") or [])]
+        }
         options = []
         for predicted_index, finding in enumerate(predicted):
             if _normalized_path(finding.path) != truth_path:
                 continue
             canonical_rule = normalize_rule_id(finding.rule_id)
-            if RULE_TO_CWE.get(canonical_rule, canonical_rule).upper() != truth_cwe:
+            if RULE_TO_CWE.get(canonical_rule, canonical_rule).upper() not in truth_cwes:
                 continue
             if start <= finding.line <= end:
                 distance = 0

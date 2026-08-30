@@ -1,0 +1,57 @@
+{
+  "dataset": {
+    "canonical_sha256": "279496f091259517336dfbdd5988bdf209ef834b0162e422529bb9343db8c1e1",
+    "cases": 10,
+    "label_completeness": "targeted-review-comments",
+    "manifest": "benchmarks/real_pr_review_labels.jsonl",
+    "repositories": 10,
+    "repository_overlap_across_splits": false,
+    "splits": {
+      "holdout": 3,
+      "train": 3,
+      "validation": 4
+    }
+  },
+  "initial_full_diagnostic": {
+    "execution_success_rate": 1.0,
+    "formal_invalid_findings": 0,
+    "formal_unjudged_findings": 8,
+    "high_risk_recall": 0.0,
+    "output": "output/real-pr-evaluation/reviewed-10-deepseek-v4-flash.json",
+    "output_sha256": "94e57fb5251597a8e40282a513476f627865ed11f0e16a06435231175c5f47b9",
+    "targeted_review_fn": 9,
+    "targeted_review_recall": 0.1,
+    "targeted_review_tp": 1
+  },
+  "limitations": [
+    "The labels target one public review issue per PR and are not exhaustive negative labels.",
+    "The aggregate improved checkpoint mixes cached runs from different implementation revisions and is not a release benchmark.",
+    "A uniform rerun and human adjudication of unexpected findings are required before estimating precision."
+  ],
+  "rules_14": {
+    "strict_fp": 3,
+    "targeted_review_fn": 10,
+    "targeted_review_recall": 0.0,
+    "targeted_review_tp": 0
+  },
+  "schema_version": 1,
+  "sphinx_14366_controlled_comparison": {
+    "after_semantic_probe": {
+      "exact_line_accuracy": 1.0,
+      "evidence_accuracy": 1.0,
+      "fn": 0,
+      "fp_after_semantic_dedup": 0,
+      "output": "output/real-pr-evaluation/sphinx-14366-semantic-probe-rescored.json",
+      "output_sha256": "90d36a887bea3ee139fef9ef56b98274d40293e5b26453bb334a50cc22cc612d",
+      "tp": 1
+    },
+    "before_semantic_probe": {
+      "fn": 1,
+      "output": "output/real-pr-evaluation/sphinx-14366-risk-ranked-preflight.json",
+      "output_sha256": "a624184ca1516c72c707b2c055e87a6d108fb73362b824e3f4a9a53c532e4260",
+      "tp": 0
+    },
+    "public_review_comment": "https://github.com/sphinx-doc/sphinx/pull/14366#discussion_r3825499851"
+  },
+  "status": "diagnostic-not-release-benchmark"
+}
