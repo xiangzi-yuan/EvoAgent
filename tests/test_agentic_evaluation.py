@@ -213,8 +213,13 @@ class AgenticEvaluationTests(unittest.TestCase):
             ["uv.lock", ".github/workflow.yml", "sqlmodel/main.py", "tests/test_main.py"],
         )
 
-        self.assertIn("sqlmodel/main.py", delegations[0]["files"])
-        self.assertNotIn("tests/test_main.py", delegations[0]["files"])
+        coverage = next(
+            item for item in delegations
+            if item["assignment_id"] == "correctness-source-coverage"
+        )
+        self.assertEqual(["sqlmodel/main.py"], coverage["files"])
+        self.assertNotIn("tests/test_main.py", coverage["files"])
+        self.assertNotIn("uv.lock", coverage["files"])
 
     def test_repository_role_cannot_finish_before_a_factual_tool_call(self):
         class SequencedClient:

@@ -1261,18 +1261,31 @@ class ModeRouterReviewer(Reviewer):
                 for part in ("/test", "tests/", ".github/", "docs/", "examples/")
             )
         ][:100]
-        correctness = next(
-            (item for item in values if item["worker"] == "correctness-reliability"),
-            None,
-        )
-        if correctness is not None and production_files:
-            correctness["files"] = list(dict.fromkeys(
-                list(correctness.get("files") or []) + production_files
-            ))[:100]
-            correctness["required_evidence"] = list(dict.fromkeys(
-                list(correctness.get("required_evidence") or [])
-                + ["Inspect every changed production source file assigned by the coverage gate."]
-            ))[:20]
+        correctness_files = {
+            path
+            for item in values
+            if item["worker"] == "correctness-reliability"
+            for path in item.get("files") or []
+        }
+        uncovered = [
+            path for path in production_files if path not in correctness_files
+        ]
+        if (
+            uncovered
+            and "correctness-reliability" in worker_roles
+            and len(values) < 12
+        ):
+            values.append({
+                "assignment_id": "correctness-source-coverage",
+                "worker": "correctness-reliability",
+                "objective": "Review uncovered production source semantics.",
+                "files": uncovered[:100],
+                "risk_domains": ["correctness"],
+                "required_evidence": [
+                    "Inspect every assigned file with repository evidence.",
+                ],
+                "skills": list(requested_skills),
+            })
         return values
 
     @staticmethod

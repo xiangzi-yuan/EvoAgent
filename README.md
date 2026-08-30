@@ -193,6 +193,8 @@ python scripts/run_full_agentic_batch.py output/real-pr-reviewed-10-targeted-v2.
 
 当前剩余瓶颈已经可以区分：任务分解层会强制所有生产源码至少交给 Correctness Worker；对于 SQLModel `model_dump()` 与 `Field(exclude=True)` 这类第三方库语义，模型即使读到正确源码仍可能判断错误，下一阶段需要版本化 Agent Skill 或管理员配置的回归测试，而不是继续放宽发布门禁。
 
+提交 `24af53c` 的统一 10 PR 重跑执行成功率为 90%（mypy 案例收到模型截断 JSON），目标 Review 召回 10%。人工复核全部 6 条额外正式 Finding 后均判为无效，因此正式层人工裁决精度为 14.29%、噪声率为 85.71%；8 条建议中 4 条 optional、4 条 invalid，建议效用率为 50%。该次运行共记录 926,071 tokens。结果证明单纯增加探针仍不足：SQLModel 探针虽然执行了，Lead 的 workflow 导向任务却淹没了生产源码结论。后续任务分解已改为给未覆盖生产源码创建独立 `correctness-source-coverage` assignment，避免只把源码路径附加到不相关的 workflow 任务。
+
 项目启动时会自动读取项目根目录的 `.env`，也兼容 `evoagent/.env`；系统环境变量优先于 `.env` 文件。推荐将以下内容写入根目录 `.env`（该文件已被 `.gitignore` 忽略）：
 
 ```env

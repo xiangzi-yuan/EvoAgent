@@ -48,7 +48,7 @@ def select_cases(cases: list, limit: int) -> list:
     return selected
 
 
-def load_results(path: str, allowed_ids: set) -> dict:
+def load_results(path: str, allowed_ids: set, include_failures: bool = False) -> dict:
     if not path or not os.path.isfile(path):
         return {}
     with open(path, encoding="utf-8") as handle:
@@ -56,7 +56,8 @@ def load_results(path: str, allowed_ids: set) -> dict:
     return {
         item["id"]: item
         for item in report.get("case_results", [])
-        if item.get("id") in allowed_ids and item.get("execution_success") is True
+        if item.get("id") in allowed_ids
+        and (include_failures or item.get("execution_success") is True)
     }
 
 
@@ -173,6 +174,10 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("dataset")
     parser.add_argument("--max-cases", type=int, default=10)
+    parser.add_argument(
+        "--case-id", action="append", default=[],
+        help="Run only this case id; repeat for multiple targeted diagnostics.",
+    )
     parser.add_argument("--timeout", type=int, default=60)
     parser.add_argument("--token-budget", type=int, default=16000)
     parser.add_argument("--time-budget", type=int, default=120)
@@ -212,11 +217,22 @@ def main() -> None:
         "suggestion": apply_suggestion_judgments(args.suggestion_judgments, cases),
         "formal": apply_formal_judgments(args.formal_judgments, cases),
     }
-    selected = select_cases(cases, args.max_cases)
+    if args.case_id:
+        requested = set(args.case_id)
+        known = {case["id"] for case in cases}
+        unknown = requested.difference(known)
+        if unknown:
+            parser.error("unknown --case-id values: %s" % ", ".join(sorted(unknown)))
+        selected = [case for case in cases if case["id"] in requested][:args.max_cases]
+    else:
+        selected = select_cases(cases, args.max_cases)
     allowed_ids = {case["id"] for case in selected}
     output = os.path.abspath(args.output)
     completed = load_results(output, allowed_ids)
-    completed.update(load_results(os.path.abspath(args.seed_report), allowed_ids))
+    completed.update(load_results(
+        os.path.abspath(args.seed_report), allowed_ids,
+        include_failures=args.cached_only,
+    ))
     missing_cached = [case["id"] for case in selected if case["id"] not in completed]
     if args.cached_only and missing_cached:
         parser.error(

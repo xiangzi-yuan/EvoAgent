@@ -4,6 +4,10 @@
   "reviewer": "codex-manual-semantic-review",
   "reviewed_at": "2026-08-30",
   "source_report_sha256": "665b7f1e3372bd2a6375b6858d99c38046eababff29ca9d867e45bb07115e813",
+  "source_reports": {
+    "mixed_improved": "665b7f1e3372bd2a6375b6858d99c38046eababff29ca9d867e45bb07115e813",
+    "uniform_v3": "892731bf9968ed30133708759760ff07a8885b404bf7df0ab3481951d63135eb"
+  },
   "policy": {
     "required": "PR 引入的具体缺陷，合并前应修复。",
     "optional": "建议合理但不修也不构成功能、安全或可靠性缺陷。",
@@ -63,6 +67,46 @@
         "severity": "low",
         "verdict": "invalid",
         "note": "该 print 位于向用户说明如何查询版本的 Markdown/bash 代码块内，不是可执行项目代码；本地规则忽略了 YAML block scalar 和文档上下文。"
+      },
+      {
+        "path": ".github/workflows/add-to-project.yml",
+        "line": 18,
+        "rule_id": "ZIZMOR-SECRETS-OUTSIDE-ENV",
+        "severity": "high",
+        "verdict": "invalid",
+        "note": "PROJECTS_TOKEN 在基线中已经传给同一第三方 Action；本次只移除了 zizmor 忽略注释并降级 Action。Finding 明确承认风险模式原已存在，却仍把 secret 暴露当成本 PR 引入，违反因果门禁。"
+      },
+      {
+        "path": ".github/workflows/deploy-docs.yml",
+        "line": 10,
+        "rule_id": "ZIZMOR-PERMISSIONS",
+        "severity": "medium",
+        "verdict": "invalid",
+        "note": "该 workflow 只有 deploy-docs 一个 job；相同四项权限从唯一 job 移到 workflow 顶层没有扩大到其他 job。Finding 所称权限变宽与真实结构不符。"
+      },
+      {
+        "path": ".github/workflows/detect-conflicts.yml",
+        "line": 15,
+        "rule_id": "ZIZMOR-SECRETS-OUTSIDE-ENV",
+        "severity": "medium",
+        "verdict": "invalid",
+        "note": "GITHUB_TOKEN 在基线中已传给同一 Action；删除静态扫描忽略注释不改变运行语义。Finding 没有证明 v3.0.3 相对 v3.1.0 新增了 token 泄露。"
+      },
+      {
+        "path": ".github/workflows/issue-manager.yml",
+        "line": 12,
+        "rule_id": "ZIZMOR-PERMISSIONS",
+        "severity": "medium",
+        "verdict": "invalid",
+        "note": "该 workflow 只有 issue-manager 一个 job，issues/pull-requests 写权限在基线已经赋给它；移动到顶层未增加任何其他 job 的权限。"
+      },
+      {
+        "path": ".github/workflows/smokeshow.yml",
+        "line": 49,
+        "rule_id": "ZIZMOR-SECRETS-OUTSIDE-ENV",
+        "severity": "medium",
+        "verdict": "invalid",
+        "note": "SMOKESHOW_AUTH_KEY 在基线同一位置已经存在；本次仅删除 zizmor 忽略注释。head_sha 是固定十六进制提交哈希，Finding 也没有给出 Action 降级导致泄露的新证据。"
       }
     ],
     "aiohttp-pr-13559-b7a5c9ed": [
@@ -73,6 +117,16 @@
         "severity": "medium",
         "verdict": "invalid",
         "note": "这是有限输入上的协议解析循环，不是重试循环。每轮要么推进 start_pos/解析状态，要么在输入不足、背压或分片未完成时 break；扫描器仅凭 while True 报警，缺少不终止证据。"
+      }
+    ],
+    "pydantic-pr-13717-f2cb3992": [
+      {
+        "path": "pydantic/json_schema.py",
+        "line": 1611,
+        "rule_id": "CWE-20",
+        "severity": "low",
+        "verdict": "invalid",
+        "note": "Finding 自己确认该修改与 validate_by_alias 的验证行为一致，随后只猜测未记录的非布尔配置边界；没有可触发的缺陷，却仍被发布为正式 Finding。"
       }
     ],
     "textualize-rich-pr-2922-66226402": [

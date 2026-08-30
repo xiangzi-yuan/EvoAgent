@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "status": "confirmed",
+  "reviewer": "codex-manual-semantic-review",
+  "reviewed_at": "2026-08-30",
+  "source_report": "output/real-pr-evaluation/reviewed-10-deepseek-v4-flash-uniform-v3.json",
+  "cases": {
+    "pallets-werkzeug-pr-2888-15b92ecd": [
+      {
+        "path": "src/werkzeug/datastructures/structures.py",
+        "line": 91,
+        "rule_id": "CWE-252",
+        "verdict": "invalid",
+        "note": "代码先读值并转换，转换成功后才删除；建议把真实实现看成了先 pop 后转换。"
+      },
+      {
+        "path": "tests/conftest.py",
+        "line": 84,
+        "rule_id": "CWE-252",
+        "verdict": "invalid",
+        "note": "Python 文件对象到达 EOF 后，在文件追加并 flush 后再次迭代可以读到新行；真正的问题是无 sleep 的忙等，不是永远读不到追加内容。"
+      }
+    ],
+    "tiangolo-sqlmodel-pr-1897-35ddc4cc": [
+      {
+        "path": ".github/workflows/deploy-docs.yml",
+        "line": 62,
+        "rule_id": "ZIZMOR-SECRETS-OUTSIDE-ENV",
+        "verdict": "invalid",
+        "note": "Cloudflare secrets 在基线已传给同一 Action，删除忽略注释不改变暴露面；GitHub head_sha 也是固定十六进制，不支持命令注入猜测。"
+      },
+      {
+        "path": ".github/workflows/pre-commit.yml",
+        "line": 31,
+        "rule_id": "ZIZMOR-SECRETS-OUTSIDE-ENV",
+        "verdict": "invalid",
+        "note": "PRE_COMMIT secret 与 checkout PR 的流程在基线已经存在；Finding 没有指出本次 Action 小版本降级新增的可利用变化。"
+      },
+      {
+        "path": ".github/workflows/deploy-docs.yml",
+        "line": 62,
+        "rule_id": "CWE-1104",
+        "verdict": "optional",
+        "note": "无理由回退 wrangler-action 值得要求重基或说明，但没有版本说明、失败复现或不兼容证据，不能断言部署会失败。"
+      },
+      {
+        "path": ".github/workflows/detect-conflicts.yml",
+        "line": 15,
+        "rule_id": "CWE-1104",
+        "verdict": "optional",
+        "note": "Action 版本回退是合理审查提醒，但“会漏掉冲突修复”只是未验证推测。"
+      },
+      {
+        "path": ".github/workflows/latest-changes.yml",
+        "line": 26,
+        "rule_id": "CWE-1104",
+        "verdict": "optional",
+        "note": "陈旧分支带来的 tmate 版本回退应在合并前清理，但没有证据表明 v3.23 在本工作流中失效。"
+      },
+      {
+        "path": ".github/workflows/latest-changes.yml",
+        "line": 29,
+        "rule_id": "CWE-1104",
+        "verdict": "optional",
+        "note": "latest-changes 版本回退值得提示重基；缺少 changelog 或复现时只能算非阻塞兼容性建议。"
+      }
+    ]
+  }
+}
