@@ -12,6 +12,7 @@ from typing import Any, Dict, Iterable, List, Optional, Set
 
 from .diff_parser import ParsedDiff
 from .finding_policy import (
+    claim_specific_high_risk_evidence_refs,
     finding_identity,
     is_deterministic_finding,
     is_validated_agent_skill_finding,
@@ -1146,26 +1147,44 @@ class ModeRouterReviewer(Reviewer):
                         "step": 0, "tool": "search_repository", "ok": False,
                         "error": str(exc)[:1000],
                     })
-        if (
-            selected
-            and "semantic_probe" in tools.names()
-            and "replace(" in text.lower()
-            and any(token in text.lower() for token in ("url", "location", "redirect"))
+        probe_kinds = []
+        lowered = text.lower()
+        if "replace(" in lowered and any(
+            token in lowered for token in ("url", "location", "redirect")
         ):
-            try:
-                value = tools.invoke(
-                    "semantic_probe", {"kind": "url-normalization-redaction"}
-                )
-                observations.append({
-                    "step": 0, "tool": "semantic_probe", "ok": True,
-                    "result": value,
-                    "reason": "fixed normalization/redaction counterexample",
-                })
-            except Exception as exc:
-                observations.append({
-                    "step": 0, "tool": "semantic_probe", "ok": False,
-                    "error": str(exc)[:1000],
-                })
+            probe_kinds.append("url-normalization-redaction")
+        if "model_dump" in lowered and any(
+            token in lowered for token in ("setattr", "update")
+        ):
+            probe_kinds.append("serialization-exclusion-update")
+        if "__ne__" in lowered or ("__eq__" in lowered and "not equal" in lowered):
+            probe_kinds.append("equality-negation-contract")
+        if "classmethod" in lowered and any(
+            token in lowered for token in ("decorator", "fdefs_to_decorators")
+        ):
+            probe_kinds.append("decorator-order")
+        if "_gc_cycle" in lowered or (
+            "weakref" in lowered and "self_reference" in lowered
+        ):
+            probe_kinds.append("self-cycle-collection")
+        if "validate_by_alias" in lowered and "validation_alias" in lowered:
+            probe_kinds.append("alias-configuration-direction")
+        if "_missing" in lowered and "default" in lowered:
+            probe_kinds.append("tri-state-boolean")
+        if selected and "semantic_probe" in tools.names():
+            for kind in probe_kinds[:2]:
+                try:
+                    value = tools.invoke("semantic_probe", {"kind": kind})
+                    observations.append({
+                        "step": 0, "tool": "semantic_probe", "ok": True,
+                        "result": value,
+                        "reason": "fixed semantic counterexample probe: " + kind,
+                    })
+                except Exception as exc:
+                    observations.append({
+                        "step": 0, "tool": "semantic_probe", "ok": False,
+                        "error": str(exc)[:1000],
+                    })
         if selected and "ast_analyze" in tools.names():
             try:
                 value = tools.invoke("ast_analyze", {"path": selected.path})
@@ -1414,6 +1433,14 @@ class ModeRouterReviewer(Reviewer):
             repository_refs = repository_evidence_refs(finding)
             if not repository_refs:
                 reasons.append("no repository-backed tool evidence")
+            claim_refs = claim_specific_high_risk_evidence_refs(finding)
+            if (
+                finding.severity in {Severity.CRITICAL, Severity.HIGH}
+                and not claim_refs
+            ):
+                reasons.append(
+                    "high-risk claim lacks behavioral or cross-call evidence"
+                )
 
             if not reasons:
                 finding.disposition = "confirmed"
@@ -1423,6 +1450,7 @@ class ModeRouterReviewer(Reviewer):
                         critic_required and critic.get("publication_ready")
                     ),
                     "repository_evidence_count": len(repository_refs),
+                    "claim_specific_evidence_count": len(claim_refs),
                     "publication_partition_passed": True,
                 }
                 published.append(finding)
@@ -1433,6 +1461,7 @@ class ModeRouterReviewer(Reviewer):
                     "passed": False, "disposition": "suggestion",
                     "reasons": list(reasons),
                     "repository_evidence_count": len(repository_refs),
+                    "claim_specific_evidence_count": len(claim_refs),
                 }
                 suggestions.append(finding)
                 disposition = "suggestion"

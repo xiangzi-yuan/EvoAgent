@@ -68,6 +68,11 @@ REPOSITORY_EVIDENCE_TOOLS = frozenset({
     "test",
 })
 
+BEHAVIORAL_EVIDENCE_TOOLS = frozenset({
+    "semantic_probe", "run_repository_checks", "test", "run_scanners",
+    "semgrep", "bandit", "eslint", "typecheck",
+})
+
 
 def normalize_rule_id(value: str) -> str:
     """Normalize known aliases without destroying valid dynamic Skill rule ids."""
@@ -100,6 +105,83 @@ def repository_evidence_refs(finding: Finding) -> List[dict]:
         and str(item.get("tool")) in REPOSITORY_EVIDENCE_TOOLS
         and _repository_evidence_has_facts(item)
     ]
+
+
+def claim_specific_high_risk_evidence_refs(finding: Finding) -> List[dict]:
+    """Return evidence strong enough to publish a model's high-risk claim.
+
+    Merely proving that the changed line exists, or that its file parses, does
+    not prove the claimed failure mode. Accept either bounded behavioral tool
+    output or repository evidence that corroborates a different node in the
+    model's explicit call chain.
+    """
+    refs = repository_evidence_refs(finding)
+    supported = [
+        item for item in refs
+        if str(item.get("tool")) in BEHAVIORAL_EVIDENCE_TOOLS
+    ]
+    origin = (_normalized_evidence_path(finding.path), int(finding.line))
+    chain = []
+    for raw in finding.call_chain or []:
+        if not isinstance(raw, dict) or not raw.get("path"):
+            continue
+        try:
+            location = (
+                _normalized_evidence_path(str(raw["path"])), int(raw.get("line", 0)),
+            )
+        except (TypeError, ValueError):
+            continue
+        if location[1] > 0 and location != origin:
+            chain.append(location)
+    if not chain:
+        return supported
+    for item in refs:
+        if item in supported:
+            continue
+        locations = _evidence_locations(item)
+        if any(
+            path == chain_path and abs(line - chain_line) <= 3
+            for path, line in locations
+            for chain_path, chain_line in chain
+        ):
+            supported.append(item)
+    return supported
+
+
+def _normalized_evidence_path(path: str) -> str:
+    value = str(path or "").replace("\\", "/").strip()
+    return value[2:] if value.startswith(("a/", "b/")) else value
+
+
+def _evidence_locations(item: dict) -> List[tuple]:
+    payload = item.get("output")
+    if payload is None:
+        payload = item.get("output_preview")
+    if isinstance(payload, str):
+        try:
+            payload = json.loads(payload)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return []
+    values = payload if isinstance(payload, list) else [payload]
+    locations = []
+    for value in values:
+        if not isinstance(value, dict) or not value.get("path"):
+            continue
+        path = _normalized_evidence_path(str(value["path"]))
+        if value.get("line") is not None:
+            try:
+                locations.append((path, int(value["line"])))
+            except (TypeError, ValueError):
+                pass
+            continue
+        try:
+            start = int(value.get("start_line", 0))
+            end = int(value.get("end_line", start))
+        except (TypeError, ValueError):
+            continue
+        if start > 0 and end >= start:
+            locations.extend((path, line) for line in range(start, end + 1))
+    return locations
 
 
 def _repository_evidence_has_facts(item: dict) -> bool:

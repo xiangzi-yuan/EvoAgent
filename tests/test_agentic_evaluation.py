@@ -139,6 +139,32 @@ class AgenticEvaluationTests(unittest.TestCase):
         self.assertFalse(output["network_used"])
         self.assertFalse(output["arbitrary_code_executed"])
 
+    def test_fixed_semantic_probes_cover_common_cross_line_contracts(self):
+        serialization = RepositoryToolSuite.semantic_probe(
+            "serialization-exclusion-update"
+        )["output"]
+        equality = RepositoryToolSuite.semantic_probe(
+            "equality-negation-contract"
+        )["output"]
+        decorators = RepositoryToolSuite.semantic_probe("decorator-order")["output"]
+        cycle = RepositoryToolSuite.semantic_probe("self-cycle-collection")["output"]
+        alias = RepositoryToolSuite.semantic_probe(
+            "alias-configuration-direction"
+        )["output"]
+
+        self.assertTrue(serialization["excluded_field_update_lost"])
+        self.assertTrue(equality["contract_violated"])
+        self.assertFalse(decorators["same_result"])
+        self.assertTrue(cycle["collection_delayed_until_cyclic_gc"])
+        self.assertEqual(
+            ["field_name", "validation_alias"],
+            [item["selected_key"] for item in alias["truth_table"]],
+        )
+        self.assertTrue(all(
+            item["arbitrary_code_executed"] is False
+            for item in (serialization, equality, decorators, cycle, alias)
+        ))
+
     def test_expected_finding_can_declare_review_taxonomy_aliases(self):
         finding = Finding(
             rule_id="CWE-200", severity=Severity.HIGH,
@@ -306,6 +332,72 @@ class AgenticEvaluationTests(unittest.TestCase):
             metrics["precision_interpretation"],
         )
 
+    def test_formal_judgments_make_targeted_precision_estimable(self):
+        findings = [
+            Finding(
+                rule_id=rule_id, severity=Severity.MEDIUM,
+                title=title, explanation="Adjudication fixture.",
+                path="app.py", line=line, evidence="value_%d" % line,
+                fix="Apply a focused fix.", test="Add a focused test.",
+            )
+            for line, rule_id, title in (
+                (1, "CWE-476", "labelled"),
+                (2, "CWE-400", "new required defect"),
+                (3, "CWE-20", "invalid candidate"),
+            )
+        ]
+
+        class FormalReviewer:
+            name = "adjudicated-formal"
+
+            def review_case(self, _case, _parsed):
+                return findings
+
+        case = {
+            "id": "adjudicated-formal", "repository": "repo", "pull_request": 1,
+            "split": "validation",
+            "source": {
+                "kind": "public-github-pr",
+                "label_completeness": "targeted-review-comments",
+            },
+            "diff": (
+                "--- a/app.py\n+++ b/app.py\n@@ -0,0 +1,3 @@\n"
+                "+value_1\n+value_2\n+value_3\n"
+            ),
+            "expected_findings": [{
+                "path": "app.py", "start_line": 1, "end_line": 1,
+                "cwe": "CWE-476", "severity": "medium", "should_comment": True,
+            }],
+            "formal_judgments": [
+                {
+                    "path": "app.py", "line": 2, "rule_id": "CWE-400",
+                    "verdict": "required",
+                },
+                {
+                    "path": "app.py", "line": 3, "rule_id": "CWE-20",
+                    "verdict": "invalid",
+                },
+            ],
+        }
+
+        report = ProductionEvaluationHarness().run(
+            FormalReviewer(), [case], "adjudicated-formal"
+        )
+        metrics = report["metrics"]
+        self.assertEqual(1, metrics["formal_label_gap_required"])
+        self.assertEqual(1, metrics["formal_invalid_findings"])
+        self.assertEqual(0, metrics["formal_unjudged_findings"])
+        self.assertEqual(1.0, metrics["formal_adjudication_coverage"])
+        self.assertEqual(0.6667, metrics["adjudicated_formal_precision"])
+        self.assertEqual(0.6667, metrics["adjudicated_formal_utility_rate"])
+        self.assertEqual(0.3333, metrics["formal_nuisance_rate"])
+        self.assertEqual(1.0, metrics["expanded_required_recall"])
+        self.assertEqual(0.8, metrics["expanded_required_f1"])
+        self.assertEqual(
+            "human-adjudicated-targeted-labels",
+            metrics["precision_interpretation"],
+        )
+
     def test_suggestion_utility_uses_only_adjudicated_optional_and_invalid_labels(self):
         suggestions = [
             Finding(
@@ -433,6 +525,27 @@ class AgenticEvaluationTests(unittest.TestCase):
 
         self.assertEqual(1, len(findings))
         self.assertEqual("digest = hashlib.md5(value).hexdigest()", findings[0].evidence)
+
+    def test_unbounded_retry_rule_requires_no_visible_break(self):
+        bounded_diff = (
+            "--- /dev/null\n+++ b/parser.py\n@@ -0,0 +1,5 @@\n"
+            "+while True:\n+    if exhausted():\n+        break\n"
+            "+    consume()\n+return result\n"
+        )
+        retry_diff = (
+            "--- /dev/null\n+++ b/retry.py\n@@ -0,0 +1,3 @@\n"
+            "+while True:\n+    if send():\n+        return True\n"
+        )
+
+        bounded = ContextRuleReviewer().review(
+            bounded_diff, parse_unified_diff(bounded_diff)
+        )
+        retry = ContextRuleReviewer().review(
+            retry_diff, parse_unified_diff(retry_diff)
+        )
+
+        self.assertEqual([], bounded)
+        self.assertEqual(["REL-UNBOUNDED-RETRY"], [item.rule_id for item in retry])
 
     def test_non_production_data_can_debug_but_cannot_prove_claims(self):
         cases = []

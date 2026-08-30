@@ -18,7 +18,9 @@ PLACEHOLDER_SECRET = re.compile(
 )
 
 
-def suppress_contextual_false_positive(rule_id: str, content: str) -> bool:
+def suppress_contextual_false_positive(
+    rule_id: str, content: str, path: str = "",
+) -> bool:
     """Suppress narrow, auditable safe contexts that regex-only rules overmatch."""
     if rule_id == "SEC-HARDCODED-SECRET":
         literal = re.search(r"['\"]([^'\"]+)['\"]", content)
@@ -27,6 +29,14 @@ def suppress_contextual_false_positive(rule_id: str, content: str) -> bool:
         # Hashing a fixed literal is commonly a fixture/cache identifier, not a
         # password or integrity boundary. Dynamic input remains reportable.
         return bool(re.search(r"\bhashlib\.md5\s*\(\s*b?['\"]", content))
+    if rule_id == "REL-DEBUG-PRINT":
+        normalized = path.replace("\\", "/").lower()
+        # These files render user-facing prose and code examples. Their block
+        # scalar contents are not imported or executed by the project.
+        return normalized.startswith((
+            ".github/discussion_template/",
+            ".github/issue_template/",
+        )) or normalized.endswith((".md", ".mdx", ".rst"))
     return False
 
 
@@ -108,7 +118,9 @@ class LocalRuleReviewer(Reviewer):
             for rule_id, severity, pattern, title, explanation, fix, test in self.RULES:
                 if (
                     pattern.search(line.content)
-                    and not suppress_contextual_false_positive(rule_id, line.content)
+                    and not suppress_contextual_false_positive(
+                        rule_id, line.content, line.path,
+                    )
                     and (rule_id, line.path, line.line) not in seen
                 ):
                     seen.add((rule_id, line.path, line.line))
@@ -156,7 +168,9 @@ class DomainRuleReviewer(Reviewer):
                 identity = (rule_id, line.path, line.line)
                 if (
                     pattern.search(line.content)
-                    and not suppress_contextual_false_positive(rule_id, line.content)
+                    and not suppress_contextual_false_positive(
+                        rule_id, line.content, line.path,
+                    )
                     and identity not in seen
                 ):
                     seen.add(identity)

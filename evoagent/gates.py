@@ -4,6 +4,7 @@ from typing import Any, Dict, Iterable, List
 
 from .diff_parser import ParsedDiff
 from .finding_policy import (
+    claim_specific_high_risk_evidence_refs,
     is_deterministic_finding,
     is_validated_agent_skill_finding,
     normalize_rule_id,
@@ -59,8 +60,14 @@ class FindingGate:
                 if str(item.get("tool")) in self.STRONG_EVIDENCE_TOOLS
             ]
             repository_refs = repository_evidence_refs(finding)
+            claim_specific_refs = claim_specific_high_risk_evidence_refs(finding)
+            supporting_repository_refs = (
+                claim_specific_refs
+                if finding.severity in {Severity.CRITICAL, Severity.HIGH}
+                else repository_refs
+            )
             collaborative_repository_verification = bool(
-                repository_refs
+                supporting_repository_refs
                 and prior_gate.get("lead_selected")
                 and prior_gate.get("critic_publication_ready")
                 and prior_gate.get("publication_partition_passed")
@@ -74,9 +81,8 @@ class FindingGate:
                 counters["evidence"] += 1
             if (
                 finding.severity in {Severity.CRITICAL, Severity.HIGH}
-                and not strong_refs
                 and not collaborative_repository_verification
-                and not (trusted_source and finding.call_chain)
+                and not (trusted_source and (strong_refs or finding.call_chain))
             ):
                 reasons.append(
                     "evidence gate: high-risk finding requires verified scanner or tool evidence"
@@ -99,6 +105,7 @@ class FindingGate:
                 "exact_location_evidence": exact_line,
                 "strong_evidence_count": len(strong_refs),
                 "repository_evidence_count": len(repository_refs),
+                "claim_specific_evidence_count": len(claim_specific_refs),
                 "collaborative_repository_verification": (
                     collaborative_repository_verification
                 ),

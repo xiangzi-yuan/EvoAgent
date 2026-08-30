@@ -1,5 +1,6 @@
 """Repository-level factual tools exposed to LLM agents through strict schemas."""
 import ast
+import gc
 import hashlib
 import json
 import os
@@ -11,6 +12,7 @@ import sys
 import tempfile
 import shlex
 import time
+import weakref
 from typing import Any, Dict, Iterable, List, Optional, Set
 from urllib.parse import urlsplit, urlunsplit
 
@@ -296,8 +298,89 @@ class RepositoryToolSuite:
                 ],
                 "arbitrary_code_executed": False,
             })
+        if kind == "serialization-exclusion-update":
+            current = {"id": "1", "excluded_field": "old"}
+            incoming_object = {"id": "1", "excluded_field": "new"}
+            serialized = {"id": incoming_object["id"]}
+            update_payload = {
+                key: value for key, value in serialized.items() if key != "id"
+            }
+            updated = dict(current)
+            updated.update(update_payload)
+            return _evidence("semantic_probe", {
+                "kind": kind,
+                "operation": "serialize-omitting-field-then-update-excluding-id",
+                "current": current,
+                "incoming_object": incoming_object,
+                "serialized": serialized,
+                "update_payload": update_payload,
+                "updated": updated,
+                "excluded_field_update_lost": (
+                    updated["excluded_field"] != incoming_object["excluded_field"]
+                ),
+                "arbitrary_code_executed": False,
+            })
+        if kind == "equality-negation-contract":
+            left = {"plain": "same", "spans": ["red"]}
+            right = {"plain": "same", "spans": ["blue"]}
+            equal = left == right
+            not_equal_plain_only = left["plain"] != right["plain"]
+            return _evidence("semantic_probe", {
+                "kind": kind,
+                "left": left,
+                "right": right,
+                "eq_full_state": equal,
+                "ne_plain_only": not_equal_plain_only,
+                "logical_inverse_of_eq": not equal,
+                "contract_violated": not_equal_plain_only == equal,
+                "arbitrary_code_executed": False,
+            })
+        if kind == "decorator-order":
+            function = "function"
+            correct = ("outer", ("classmethod", function))
+            reordered = ("classmethod", ("outer", function))
+            return _evidence("semantic_probe", {
+                "kind": kind,
+                "source_order": ["outer", "classmethod"],
+                "python_application": correct,
+                "descriptor_forced_outermost": reordered,
+                "same_result": correct == reordered,
+                "arbitrary_code_executed": False,
+            })
+        if kind == "self-cycle-collection":
+            class CycleProbe:
+                pass
+
+            value = CycleProbe()
+            reference = weakref.ref(value)
+            value.self_reference = value
+            del value
+            alive_before_collection = reference() is not None
+            gc.collect()
+            alive_after_collection = reference() is not None
+            return _evidence("semantic_probe", {
+                "kind": kind,
+                "alive_after_last_external_reference_deleted": alive_before_collection,
+                "alive_after_cyclic_gc": alive_after_collection,
+                "collection_delayed_until_cyclic_gc": (
+                    alive_before_collection and not alive_after_collection
+                ),
+                "arbitrary_code_executed": False,
+            })
+        if kind == "alias-configuration-direction":
+            return _evidence("semantic_probe", {
+                "kind": kind,
+                "truth_table": [
+                    {
+                        "validate_by_alias": enabled,
+                        "selected_key": "validation_alias" if enabled else "field_name",
+                    }
+                    for enabled in (False, True)
+                ],
+                "arbitrary_code_executed": False,
+            })
         raise ValueError(
-            "kind must be url-normalization-redaction or tri-state-boolean"
+            "unsupported semantic probe kind"
         )
 
     def git_context(self, path: str, line: int = 1) -> dict:
@@ -455,7 +538,15 @@ class RepositoryToolSuite:
                     "properties": {
                         "kind": {
                             "type": "string",
-                            "enum": ["url-normalization-redaction", "tri-state-boolean"],
+                            "enum": [
+                                "url-normalization-redaction",
+                                "tri-state-boolean",
+                                "serialization-exclusion-update",
+                                "equality-negation-contract",
+                                "decorator-order",
+                                "self-cycle-collection",
+                                "alias-configuration-direction",
+                            ],
                         }
                     },
                     "required": ["kind"],

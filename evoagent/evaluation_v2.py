@@ -237,7 +237,10 @@ def product_reviewer_factories(
 
 
 class ProductionEvaluationHarness(EndToEndEvaluationHarness):
-    SUGGESTION_VERDICTS = frozenset({"required", "optional", "invalid", "duplicate"})
+    ADJUDICATION_VERDICTS = frozenset({
+        "required", "optional", "invalid", "duplicate",
+    })
+    SUGGESTION_VERDICTS = ADJUDICATION_VERDICTS
 
     @staticmethod
     def _restore_findings(values):
@@ -258,30 +261,32 @@ class ProductionEvaluationHarness(EndToEndEvaluationHarness):
         )
 
     @classmethod
-    def _suggestion_judgments(cls, case):
+    def _finding_judgments(cls, case, field, label):
         judgments = []
-        for index, raw in enumerate(case.get("suggestion_judgments") or []):
+        for index, raw in enumerate(case.get(field) or []):
             if not isinstance(raw, dict):
-                raise ValueError("suggestion judgment %d must be an object" % index)
+                raise ValueError("%s judgment %d must be an object" % (label, index))
             verdict = str(raw.get("verdict", "")).strip().lower()
-            if verdict not in cls.SUGGESTION_VERDICTS:
+            if verdict not in cls.ADJUDICATION_VERDICTS:
                 raise ValueError(
-                    "suggestion judgment %d has invalid verdict: %s" % (index, verdict)
+                    "%s judgment %d has invalid verdict: %s"
+                    % (label, index, verdict)
                 )
             try:
                 line = int(raw.get("line", raw.get("start_line", 0)))
                 end_line = int(raw.get("end_line", line))
             except (TypeError, ValueError) as exc:
                 raise ValueError(
-                    "suggestion judgment %d has an invalid line" % index
+                    "%s judgment %d has an invalid line" % (label, index)
                 ) from exc
             if line < 1 or end_line < line or not str(raw.get("path", "")).strip():
                 raise ValueError(
-                    "suggestion judgment %d requires a valid path and line range" % index
+                    "%s judgment %d requires a valid path and line range"
+                    % (label, index)
                 )
             if not str(raw.get("rule_id", raw.get("cwe", ""))).strip():
                 raise ValueError(
-                    "suggestion judgment %d requires rule_id or cwe" % index
+                    "%s judgment %d requires rule_id or cwe" % (label, index)
                 )
             rule_id = normalize_rule_id(str(raw.get("rule_id", raw.get("cwe", ""))))
             judgments.append({
@@ -295,6 +300,88 @@ class ProductionEvaluationHarness(EndToEndEvaluationHarness):
                 "note": str(raw.get("note", ""))[:2000],
             })
         return judgments
+
+    @classmethod
+    def _suggestion_judgments(cls, case):
+        return cls._finding_judgments(
+            case, "suggestion_judgments", "suggestion",
+        )
+
+    @classmethod
+    def _formal_judgments(cls, case):
+        return cls._finding_judgments(case, "formal_judgments", "formal")
+
+    def _score_formal(self, result, case, findings):
+        targeted = self._targeted_labels(case)
+        labelled_prediction_indices = {
+            int(item["predicted_index"]) for item in result.get("matches") or []
+        }
+        adjudication = [
+            {
+                "finding_index": int(item["predicted_index"]),
+                "verdict": "required",
+                "source": "expected_findings",
+                "expected_index": int(item["expected_index"]),
+                "note": "matched a trusted labelled review finding",
+            }
+            for item in result.get("matches") or []
+        ]
+        remaining = [
+            (index, finding) for index, finding in enumerate(findings)
+            if index not in labelled_prediction_indices
+        ]
+        judgments = self._formal_judgments(case) if targeted else []
+        judgment_matches = one_to_one_match(
+            judgments, [item[1] for item in remaining], self.line_tolerance
+        )
+        verdict_counts = Counter()
+        judged_remaining = set()
+        for match in judgment_matches:
+            original_index = remaining[match.predicted_index][0]
+            judgment = judgments[match.expected_index]
+            judged_remaining.add(match.predicted_index)
+            verdict_counts[judgment["verdict"]] += 1
+            adjudication.append({
+                "finding_index": original_index,
+                "verdict": judgment["verdict"],
+                "source": "formal_judgments",
+                "judgment_index": match.expected_index,
+                "note": judgment["note"],
+            })
+        for remaining_index, (original_index, _finding) in enumerate(remaining):
+            if targeted and remaining_index not in judged_remaining:
+                adjudication.append({
+                    "finding_index": original_index,
+                    "verdict": "unjudged",
+                    "source": "none",
+                })
+
+        if targeted:
+            required = int(verdict_counts["required"])
+            optional = int(verdict_counts["optional"])
+            invalid = int(verdict_counts["invalid"])
+            duplicate = int(verdict_counts["duplicate"])
+            unjudged = len(remaining) - len(judgment_matches)
+            adjudicated = len(labelled_prediction_indices) + len(judgment_matches)
+        else:
+            required = optional = duplicate = unjudged = 0
+            invalid = len(remaining)
+            adjudicated = len(findings)
+
+        result.update({
+            "invalid_comments": invalid,
+            "formal_label_gap_required": required,
+            "formal_optional_findings": optional,
+            "formal_invalid_findings": invalid,
+            "formal_duplicate_findings": duplicate,
+            "formal_unjudged_findings": unjudged,
+            "formal_adjudicated": adjudicated,
+            "formal_useful_findings": required + optional,
+            "formal_adjudication": sorted(
+                adjudication, key=lambda item: item["finding_index"]
+            ),
+        })
+        return result
 
     def _score_suggestions(self, result, case, findings, suggested_findings):
         expected = [
@@ -463,6 +550,7 @@ class ProductionEvaluationHarness(EndToEndEvaluationHarness):
                 "severity_hit": severity_hit,
                 "location_distance": match.location_distance,
             })
+        self._score_formal(result, case, findings)
         return self._score_suggestions(result, case, findings, suggestions)
 
     def _run_case(self, reviewer, case):
@@ -491,8 +579,14 @@ class ProductionEvaluationHarness(EndToEndEvaluationHarness):
         unmatched = int(result.get("fp", 0) or 0)
         result.update({
             "invalid_comments": 0 if targeted else unmatched,
+            "formal_label_gap_required": 0,
+            "formal_optional_findings": 0,
             "formal_invalid_findings": 0 if targeted else unmatched,
+            "formal_duplicate_findings": 0,
             "formal_unjudged_findings": unmatched if targeted else 0,
+            "formal_adjudicated": int(result.get("tp", 0)) + (0 if targeted else unmatched),
+            "formal_useful_findings": 0,
+            "formal_adjudication": [],
             "label_completeness": (
                 "targeted-review-comments" if targeted else "exhaustive-or-unspecified"
             ),
@@ -539,6 +633,7 @@ class ProductionEvaluationHarness(EndToEndEvaluationHarness):
                 result["evidence_hits"] += int(bool(
                     finding.evidence_refs or finding.call_chain or finding.evidence.strip()
                 ))
+            self._score_formal(result, case, findings)
             summary_reader = getattr(reviewer, "evaluation_execution", None)
             if summary_reader:
                 execution = summary_reader() or {}
@@ -583,7 +678,10 @@ class ProductionEvaluationHarness(EndToEndEvaluationHarness):
             "incremental_suggestion_tp": 0,
             "combined_tp_after_verification": 0,
             "clean_cases_without_suggestions": 0,
-            "formal_invalid_findings": 0, "formal_unjudged_findings": 0,
+            "formal_label_gap_required": 0, "formal_optional_findings": 0,
+            "formal_invalid_findings": 0, "formal_duplicate_findings": 0,
+            "formal_unjudged_findings": 0, "formal_adjudicated": 0,
+            "formal_useful_findings": 0,
             "targeted_label_cases": 0,
         })
         return values
@@ -601,7 +699,10 @@ class ProductionEvaluationHarness(EndToEndEvaluationHarness):
             "suggestion_invalid", "suggestion_duplicate", "suggestion_unjudged",
             "suggestion_adjudicated", "suggestion_useful",
             "incremental_suggestion_tp", "combined_tp_after_verification",
-            "formal_invalid_findings", "formal_unjudged_findings",
+            "formal_label_gap_required", "formal_optional_findings",
+            "formal_invalid_findings", "formal_duplicate_findings",
+            "formal_unjudged_findings", "formal_adjudicated",
+            "formal_useful_findings",
         ):
             totals[field] += int(result.get(field, 0))
         totals["targeted_label_cases"] += int(
@@ -619,6 +720,27 @@ class ProductionEvaluationHarness(EndToEndEvaluationHarness):
         tp = totals["tp"] or 1
         commented = totals["accepted_comments"] + totals["closed_comments"]
         expected_total = totals["tp"] + totals["fn"]
+        formal_predictions = totals["tp"] + totals["fp"]
+        expanded_tp = totals["tp"] + totals["formal_label_gap_required"]
+        expanded_expected = expected_total + totals["formal_label_gap_required"]
+        formal_complete = totals["formal_unjudged_findings"] == 0
+        expanded_precision = (
+            round(expanded_tp / formal_predictions, 4)
+            if formal_predictions and formal_complete else None
+        )
+        expanded_recall = (
+            round(expanded_tp / expanded_expected, 4)
+            if expanded_expected else 1.0
+        )
+        expanded_f1 = (
+            round(
+                2 * expanded_precision * expanded_recall
+                / (expanded_precision + expanded_recall),
+                4,
+            )
+            if expanded_precision is not None
+            and expanded_precision + expanded_recall > 0 else None
+        )
         values.update({
             "invalid_comments_per_pr": round(totals["invalid_comments"] / cases, 4),
             "exact_line_accuracy": round(totals["exact_location_hits"] / tp, 4),
@@ -635,17 +757,37 @@ class ProductionEvaluationHarness(EndToEndEvaluationHarness):
             "average_output_tokens_per_pr": round(totals["output_tokens"] / cases, 2),
             "average_total_tokens_per_pr": round(totals["total_tokens"] / cases, 2),
             "average_suggestions_per_pr": round(totals["suggestions"] / cases, 4),
+            "formal_label_gap_required": totals["formal_label_gap_required"],
+            "formal_optional_findings": totals["formal_optional_findings"],
             "formal_invalid_findings": totals["formal_invalid_findings"],
+            "formal_duplicate_findings": totals["formal_duplicate_findings"],
             "formal_unjudged_findings": totals["formal_unjudged_findings"],
             "formal_adjudication_coverage": round(
-                (totals["tp"] + totals["formal_invalid_findings"])
-                / max(1, totals["tp"] + totals["formal_invalid_findings"]
-                      + totals["formal_unjudged_findings"]), 4
+                totals["formal_adjudicated"] / max(1, formal_predictions), 4
             ),
             "precision_interpretation": (
                 "not-estimable-until-unexpected-findings-are-adjudicated"
-                if totals["targeted_label_cases"] else "exhaustive-labels"
+                if totals["formal_unjudged_findings"]
+                else (
+                    "human-adjudicated-targeted-labels"
+                    if totals["targeted_label_cases"] else "exhaustive-labels"
+                )
             ),
+            "adjudicated_formal_precision": expanded_precision,
+            "adjudicated_formal_utility_rate": round(
+                (
+                    totals["tp"] + totals["formal_label_gap_required"]
+                    + totals["formal_optional_findings"]
+                ) / totals["formal_adjudicated"], 4
+            ) if totals["formal_adjudicated"] and formal_complete else None,
+            "formal_nuisance_rate": round(
+                (
+                    totals["formal_invalid_findings"]
+                    + totals["formal_duplicate_findings"]
+                ) / totals["formal_adjudicated"], 4
+            ) if totals["formal_adjudicated"] and formal_complete else None,
+            "expanded_required_recall": expanded_recall,
+            "expanded_required_f1": expanded_f1,
             "targeted_review_recall": round(
                 totals["tp"] / expected_total, 4
             ) if expected_total else 1.0,

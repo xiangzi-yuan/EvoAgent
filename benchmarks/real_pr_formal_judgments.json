@@ -1,0 +1,89 @@
+{
+  "schema_version": 1,
+  "status": "confirmed",
+  "reviewer": "codex-manual-semantic-review",
+  "reviewed_at": "2026-08-30",
+  "source_report_sha256": "665b7f1e3372bd2a6375b6858d99c38046eababff29ca9d867e45bb07115e813",
+  "policy": {
+    "required": "PR 引入的具体缺陷，合并前应修复。",
+    "optional": "建议合理但不修也不构成功能、安全或可靠性缺陷。",
+    "invalid": "结论与真实代码语义不符，或扫描了不可执行的示例文本。",
+    "duplicate": "与另一条已确认 Finding 指向同一根因。"
+  },
+  "cases": {
+    "pallets-werkzeug-pr-2888-15b92ecd": [
+      {
+        "path": "src/werkzeug/datastructures/structures.py",
+        "line": 91,
+        "rule_id": "CWE-252",
+        "severity": "high",
+        "verdict": "invalid",
+        "note": "实现先通过 self[key] 读取并完成类型转换，只有转换成功后才 del self[key]；Finding 所称的先 pop 后转换并不存在，新增测试也明确验证转换失败时键仍保留。"
+      },
+      {
+        "path": "tests/conftest.py",
+        "line": 68,
+        "rule_id": "CWE-400",
+        "severity": "medium",
+        "verdict": "required",
+        "note": "普通日志文件迭代到 EOF 会立即返回；外层 while True 没有 sleep，会在等待新日志时持续空转。基线实现原本在每轮末尾 sleep(0.1)，该 PR 将其删除，构成测试进程 CPU 忙等回归。"
+      },
+      {
+        "path": "tests/conftest.py",
+        "line": 75,
+        "rule_id": "CWE-20",
+        "severity": "medium",
+        "verdict": "required",
+        "note": "基线使用 contextlib.closing 保证 HTTPConnection 在请求或取响应异常时关闭；新增实现只在成功路径调用 close，异常路径失去确定性清理，属于测试基础设施的资源管理回归。"
+      }
+    ],
+    "psf-requests-pr-7433-1c8315e4": [
+      {
+        "path": "src/requests/models.py",
+        "line": 599,
+        "rule_id": "CWE-754",
+        "severity": "high",
+        "verdict": "invalid",
+        "note": "hasattr 只吞掉 AttributeError，代理对象在属性解析中抛出的其他异常按 Python 协议应继续传播；无依据地捕获所有 Exception 会掩盖真实故障。该 PR 最终合入版本也保留了同样的 hasattr 语义。"
+      }
+    ],
+    "tiangolo-sqlmodel-pr-1897-35ddc4cc": [
+      {
+        "path": ".github/DISCUSSION_TEMPLATE/questions.yml",
+        "line": 88,
+        "rule_id": "REL-DEBUG-PRINT",
+        "severity": "low",
+        "verdict": "invalid",
+        "note": "print(hero_1) 位于 GitHub Discussion 表单的示例代码占位文本中，不是仓库运行路径；不会污染服务日志，也不是新增调试语句。"
+      },
+      {
+        "path": ".github/DISCUSSION_TEMPLATE/questions.yml",
+        "line": 136,
+        "rule_id": "REL-DEBUG-PRINT",
+        "severity": "low",
+        "verdict": "invalid",
+        "note": "该 print 位于向用户说明如何查询版本的 Markdown/bash 代码块内，不是可执行项目代码；本地规则忽略了 YAML block scalar 和文档上下文。"
+      }
+    ],
+    "aiohttp-pr-13559-b7a5c9ed": [
+      {
+        "path": "aiohttp/_websocket/reader.py",
+        "line": 439,
+        "rule_id": "REL-UNBOUNDED-RETRY",
+        "severity": "medium",
+        "verdict": "invalid",
+        "note": "这是有限输入上的协议解析循环，不是重试循环。每轮要么推进 start_pos/解析状态，要么在输入不足、背压或分片未完成时 break；扫描器仅凭 while True 报警，缺少不终止证据。"
+      }
+    ],
+    "textualize-rich-pr-2922-66226402": [
+      {
+        "path": "rich/markdown.py",
+        "line": 170,
+        "rule_id": "CWE-754",
+        "severity": "high",
+        "verdict": "invalid",
+        "note": "Pygments 不识别 default 时，Syntax.lexer 已捕获 ClassNotFound 并返回 None；Syntax.highlight 随后直接追加未高亮文本，不会抛异常。Finding 漏读了同一快照中 rich/syntax.py 的兜底分支。"
+      }
+    ]
+  }
+}

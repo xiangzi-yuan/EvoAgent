@@ -92,14 +92,40 @@ class FindingPolicyTests(unittest.TestCase):
         self.assertEqual([], suggestions)
         self.assertEqual("confirmed", decisions[0]["disposition"])
 
-    def test_collaboratively_verified_repository_evidence_can_support_high_risk(self):
+    def test_same_line_repository_search_cannot_prove_high_risk_behavior(self):
         candidate = finding(severity=Severity.HIGH)
         candidate.evidence_refs = [{
             "evidence_id": "search_repository:contract",
             "tool": "search_repository",
             "output": [{"path": "app.py", "line": 2, "content": "value = None"}],
         }]
-        published, _suggestions, _decisions = ModeRouterReviewer._partition_publication(
+        published, suggestions, decisions = ModeRouterReviewer._partition_publication(
+            [], [candidate], [candidate],
+            [{"finding_index": 0, "publication_ready": True}],
+            repository_available=True,
+        )
+
+        self.assertEqual([], published)
+        self.assertEqual([candidate], suggestions)
+        self.assertIn(
+            "high-risk claim lacks behavioral or cross-call evidence",
+            decisions[0]["reasons"],
+        )
+
+    def test_cross_call_repository_evidence_can_support_high_risk(self):
+        candidate = finding(severity=Severity.HIGH)
+        candidate.call_chain = [
+            {"path": "app.py", "line": 1, "symbol": "dangerous"},
+            {"path": "config.py", "line": 20, "symbol": "load_value"},
+        ]
+        candidate.evidence_refs = [{
+            "evidence_id": "search_repository:contract",
+            "tool": "search_repository",
+            "output": [{
+                "path": "config.py", "line": 20, "content": "value = None",
+            }],
+        }]
+        published, suggestions, _decisions = ModeRouterReviewer._partition_publication(
             [], [candidate], [candidate],
             [{"finding_index": 0, "publication_ready": True}],
             repository_available=True,
@@ -107,6 +133,7 @@ class FindingPolicyTests(unittest.TestCase):
 
         result = FindingGate().apply(published, parse_unified_diff(DIFF))
 
+        self.assertEqual([], suggestions)
         self.assertEqual([candidate], result.accepted)
         self.assertTrue(candidate.gate["collaborative_repository_verification"])
 

@@ -9,6 +9,29 @@ from .models import Finding, Severity
 from .reviewer import Reviewer, suppress_contextual_false_positive
 
 
+def _added_loop_has_break(parsed: ParsedDiff, target) -> bool:
+    """Return whether an added ``while True`` body has an explicit exit.
+
+    The regex rule is deliberately conservative: without an exit in the
+    visible added body it remains a candidate for repository verification.
+    A parser loop with one or more ``break`` statements is not, by itself, an
+    unbounded retry finding.
+    """
+    loop_indent = len(target.content) - len(target.content.lstrip())
+    for line in parsed.added_lines:
+        if line.path != target.path or line.line <= target.line:
+            continue
+        stripped = line.content.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        indent = len(line.content) - len(line.content.lstrip())
+        if indent <= loop_indent:
+            break
+        if re.match(r"^break\b", stripped):
+            return True
+    return False
+
+
 class ContextRuleReviewer(Reviewer):
     """Supplemental deterministic rules used by the controlled benchmark.
 
@@ -38,7 +61,13 @@ class ContextRuleReviewer(Reviewer):
             for rule_id, severity, pattern in self.RULES:
                 if (
                     not pattern.search(line.content)
-                    or suppress_contextual_false_positive(rule_id, line.content)
+                    or suppress_contextual_false_positive(
+                        rule_id, line.content, line.path,
+                    )
+                    or (
+                        rule_id == "REL-UNBOUNDED-RETRY"
+                        and _added_loop_has_break(parsed, line)
+                    )
                 ):
                     continue
                 findings.append(Finding(

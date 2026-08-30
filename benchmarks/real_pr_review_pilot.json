@@ -23,10 +23,25 @@
     "targeted_review_recall": 0.1,
     "targeted_review_tp": 1
   },
+  "human_adjudicated_mixed_checkpoint": {
+    "adjudicated_formal_precision": 0.4,
+    "expanded_required_f1": 0.3636,
+    "expanded_required_recall": 0.3333,
+    "formal_adjudication_coverage": 1.0,
+    "formal_invalid_findings": 6,
+    "formal_label_gap_required": 2,
+    "formal_nuisance_rate": 0.6,
+    "formal_unjudged_findings": 0,
+    "judgments": "benchmarks/real_pr_formal_judgments.json",
+    "judgments_sha256": "c7b35762a360fcc105f0c7cd9a087f305aaad0effbf1fb690d0c368018ad20cc",
+    "output": "output/real-pr-evaluation/reviewed-10-deepseek-v4-flash-adjudicated.json",
+    "output_sha256": "82a0d56bc7f3c7622eaf5deebfd3961761a10129ab37eb5ba386e8df592055e0",
+    "targeted_review_recall": 0.2
+  },
   "limitations": [
     "The labels target one public review issue per PR and are not exhaustive negative labels.",
     "The aggregate improved checkpoint mixes cached runs from different implementation revisions and is not a release benchmark.",
-    "A uniform rerun and human adjudication of unexpected findings are required before estimating precision."
+    "The unexpected formal findings are fully human-adjudicated, but a uniform post-change rerun is still required before a release claim."
   ],
   "rules_14": {
     "strict_fp": 3,

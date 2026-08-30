@@ -29,6 +29,19 @@ class LocalReviewerTests(unittest.TestCase):
         self.assertEqual(1, len(findings))
         self.assertEqual("api_key = 'production-secret-value'", findings[0].evidence)
 
+    def test_debug_print_rule_ignores_github_form_examples(self):
+        diff = (
+            "--- /dev/null\n+++ b/.github/DISCUSSION_TEMPLATE/questions.yml\n"
+            "@@ -0,0 +1,2 @@\n+placeholder: |\n+  print(example)\n"
+            "--- /dev/null\n+++ b/app.py\n@@ -0,0 +1 @@\n+print(secret)\n"
+        )
+
+        findings = LocalRuleReviewer().review(diff, parse_unified_diff(diff))
+
+        self.assertEqual(1, len(findings))
+        self.assertEqual("app.py", findings[0].path)
+        self.assertEqual("REL-DEBUG-PRINT", findings[0].rule_id)
+
 
 if __name__ == "__main__":
     unittest.main()

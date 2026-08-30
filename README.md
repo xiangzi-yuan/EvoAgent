@@ -181,6 +181,14 @@ python scripts/import_github_review_dataset.py benchmarks/real_pr_review_labels.
 
 这批标签的完整性是 `targeted-review-comments`：每条标签证明一个 Reviewer 确实指出的问题，但不声称穷举 PR 中全部问题。因此未命中的额外 Finding 计入 `formal_unjudged_findings`，人工判定前不能称为误报，也不能用它估计 Precision。
 
+额外正式 Finding 的人工判定保存在 `benchmarks/real_pr_formal_judgments.json`。判定分为 `required`、`optional`、`invalid`、`duplicate`，可在不调用模型的情况下重算缓存结果：
+
+```powershell
+python scripts/run_full_agentic_batch.py output/real-pr-reviewed-10-targeted-v2.jsonl --max-cases 10 --cached-only --seed-report output/real-pr-evaluation/reviewed-10-deepseek-v4-flash-improved.json --formal-judgments benchmarks/real_pr_formal_judgments.json --output output/real-pr-evaluation/reviewed-10-deepseek-v4-flash-adjudicated.json
+```
+
+本次 8 条额外 Finding 的人工结论为：2 条 `required`、6 条 `invalid`、0 条未判定。混合检查点的公开目标 Review 召回为 20%；补入 2 条确认的标签缺口后，扩展必修召回为 33.33%，人工裁决精度为 40%，噪声率为 60%。这些数字来自不同实现版本的缓存混合检查点，只能用于诊断，不能替代统一版本全量重跑。
+
 首轮 DeepSeek 四角色诊断执行成功率为 100%，目标 Review 召回 1/10；14 条规则为 0/10。对 Sphinx #14366 做同案例修复前后对照时，Worker 原本找到了问题但 Critic 因缺乏可执行证据拒绝；加入固定、无网络、不可执行任意代码的 URL 规范化探针后，系统在第 405 行发布了有证据的 Finding，命中公开 Review。这个单例对照证明语义探针有效，但不是 10 条全量重跑结果。机器可读的诊断摘要见 `benchmarks/real_pr_review_pilot.json`。
 
 当前剩余瓶颈已经可以区分：任务分解层会强制所有生产源码至少交给 Correctness Worker；对于 SQLModel `model_dump()` 与 `Field(exclude=True)` 这类第三方库语义，模型即使读到正确源码仍可能判断错误，下一阶段需要版本化 Agent Skill 或管理员配置的回归测试，而不是继续放宽发布门禁。

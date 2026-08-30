@@ -60,7 +60,7 @@ def load_results(path: str, allowed_ids: set) -> dict:
     }
 
 
-def apply_suggestion_judgments(path: str, cases: list) -> dict:
+def apply_judgments(path: str, cases: list, field: str, label: str) -> dict:
     if not path:
         return {"provided": False, "cases": 0, "judgments": 0, "sha256": ""}
     absolute = os.path.abspath(path)
@@ -69,20 +69,20 @@ def apply_suggestion_judgments(path: str, cases: list) -> dict:
     payload = json.loads(raw.decode("utf-8"))
     by_case = payload.get("cases") or {}
     if not isinstance(by_case, dict):
-        raise ValueError("suggestion judgment file requires an object in cases")
+        raise ValueError("%s judgment file requires an object in cases" % label)
     case_ids = {case["id"] for case in cases}
     unknown = set(by_case).difference(case_ids)
     if unknown:
         raise ValueError(
-            "suggestion judgments reference unknown cases: %s"
-            % ", ".join(sorted(unknown))
+            "%s judgments reference unknown cases: %s"
+            % (label, ", ".join(sorted(unknown)))
         )
     count = 0
     for case in cases:
         judgments = by_case.get(case["id"], [])
         if not isinstance(judgments, list):
-            raise ValueError("suggestion judgments must be arrays per case")
-        case["suggestion_judgments"] = judgments
+            raise ValueError("%s judgments must be arrays per case" % label)
+        case[field] = judgments
         count += len(judgments)
     return {
         "provided": True,
@@ -93,6 +93,16 @@ def apply_suggestion_judgments(path: str, cases: list) -> dict:
         "sha256": hashlib.sha256(raw).hexdigest(),
         "path": absolute,
     }
+
+
+def apply_suggestion_judgments(path: str, cases: list) -> dict:
+    return apply_judgments(
+        path, cases, "suggestion_judgments", "suggestion",
+    )
+
+
+def apply_formal_judgments(path: str, cases: list) -> dict:
+    return apply_judgments(path, cases, "formal_judgments", "formal")
 
 
 def build_report(
@@ -139,7 +149,8 @@ def build_report(
             "source_sha256": source_dataset_sha256,
             "selected_normalized_sha256": dataset_fingerprint(selected),
             "readiness": validate_real_dataset(selected),
-            "suggestion_judgments": judgment_metadata,
+            "suggestion_judgments": judgment_metadata["suggestion"],
+            "formal_judgments": judgment_metadata["formal"],
         },
         "metrics": harness._metrics(totals),
         "by_split": by_split,
@@ -175,6 +186,10 @@ def main() -> None:
         help="Optional required/optional/invalid/duplicate adjudication JSON.",
     )
     parser.add_argument(
+        "--formal-judgments", default="",
+        help="Optional adjudication JSON for unexpected formal findings.",
+    )
+    parser.add_argument(
         "--output",
         default=os.path.join(
             ROOT, "output", "agentic-evaluation", "full-agentic-batch.json"
@@ -193,9 +208,10 @@ def main() -> None:
     for case in cases:
         for finding in case["expected_findings"]:
             finding.setdefault("should_comment", True)
-    judgment_metadata = apply_suggestion_judgments(
-        args.suggestion_judgments, cases
-    )
+    judgment_metadata = {
+        "suggestion": apply_suggestion_judgments(args.suggestion_judgments, cases),
+        "formal": apply_formal_judgments(args.formal_judgments, cases),
+    }
     selected = select_cases(cases, args.max_cases)
     allowed_ids = {case["id"] for case in selected}
     output = os.path.abspath(args.output)
