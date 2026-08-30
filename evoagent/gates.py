@@ -35,6 +35,7 @@ class FindingGate:
         counters = {"format": 0, "evidence": 0, "confidence": 0, "release": 0}
         for finding in findings:
             reasons = []
+            prior_gate = dict(finding.gate or {})
             original_rule_id = finding.rule_id
             finding.rule_id = normalize_rule_id(finding.rule_id)
             if finding.rule_id != original_rule_id and not finding.original_rule_id:
@@ -57,6 +58,12 @@ class FindingGate:
                 if str(item.get("tool")) in self.STRONG_EVIDENCE_TOOLS
             ]
             repository_refs = repository_evidence_refs(finding)
+            collaborative_repository_verification = bool(
+                repository_refs
+                and prior_gate.get("lead_selected")
+                and prior_gate.get("critic_publication_ready")
+                and prior_gate.get("publication_partition_passed")
+            )
             trusted_source = (
                 is_deterministic_finding(finding)
                 or is_validated_agent_skill_finding(finding)
@@ -64,8 +71,11 @@ class FindingGate:
             if not exact_line and not valid_refs and not finding.call_chain:
                 reasons.append("evidence gate: no matching code, call chain or tool evidence")
                 counters["evidence"] += 1
-            if finding.severity in {Severity.CRITICAL, Severity.HIGH} and not strong_refs and not (
-                trusted_source and finding.call_chain
+            if (
+                finding.severity in {Severity.CRITICAL, Severity.HIGH}
+                and not strong_refs
+                and not collaborative_repository_verification
+                and not (trusted_source and finding.call_chain)
             ):
                 reasons.append(
                     "evidence gate: high-risk finding requires verified scanner or tool evidence"
@@ -88,6 +98,9 @@ class FindingGate:
                 "exact_location_evidence": exact_line,
                 "strong_evidence_count": len(strong_refs),
                 "repository_evidence_count": len(repository_refs),
+                "collaborative_repository_verification": (
+                    collaborative_repository_verification
+                ),
             }
             if reasons:
                 finding.disposition = "rejected"

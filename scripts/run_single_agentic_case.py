@@ -29,6 +29,10 @@ def main() -> None:
     parser.add_argument("--token-budget", type=int, default=16000)
     parser.add_argument("--time-budget", type=int, default=120)
     parser.add_argument(
+        "--without-repository-context", action="store_true",
+        help="Remove repository_root for a controlled Diff-only comparison.",
+    )
+    parser.add_argument(
         "--output",
         default=os.path.join(
             ROOT, "output", "agentic-evaluation", "single-case.json"
@@ -48,6 +52,9 @@ def main() -> None:
     )
     if case is None:
         parser.error("case was not found")
+    if args.without_repository_context:
+        case = dict(case)
+        case.pop("repository_root", None)
     for finding in case["expected_findings"]:
         finding.setdefault("should_comment", True)
 
@@ -77,9 +84,10 @@ def main() -> None:
         handle.write("\n")
     result = report["case_results"][0]
     print(
-        "DONE case=%s success=%s predicted=%s tp=%s fp=%s fn=%s elapsed=%.1fs"
+        "DONE case=%s success=%s predicted=%s suggestions=%s tp=%s fp=%s fn=%s elapsed=%.1fs"
         % (
             result["id"], result["execution_success"], result["predicted"],
+            result.get("suggestions", 0),
             result["tp"], result["fp"], result["fn"],
             time.monotonic() - started,
         ),

@@ -176,6 +176,7 @@ class ProductArmReviewer:
     def evaluation_summary(self) -> dict:
         summary = self._last_summary
         collaboration = summary.get("collaboration") or {}
+        execution = summary.get("execution") or {}
         lead = collaboration.get("lead") or {}
         return {
             "gates": dict(summary.get("gates") or {}),
@@ -186,6 +187,10 @@ class ProductArmReviewer:
             "accepted_findings": int(collaboration.get("accepted_findings", 0) or 0),
             "suggestion_count": int(collaboration.get("suggestion_count", 0) or 0),
             "suggested_findings": list(summary.get("suggested_findings") or []),
+            "repository_context": dict(summary.get("repository_context") or {}),
+            "assignments": list(collaboration.get("assignments") or []),
+            "worker_results": list(collaboration.get("worker_results") or []),
+            "tool_call_log": list(execution.get("tool_call_log") or []),
             "publication_decisions": list(
                 collaboration.get("publication_decisions") or []
             ),

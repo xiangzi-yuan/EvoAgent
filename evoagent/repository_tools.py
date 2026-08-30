@@ -92,7 +92,16 @@ class RepositoryToolSuite:
         if not query:
             raise ValueError("query is required")
         hits = []
-        for relative in self._files():
+        source_suffixes = (
+            ".py", ".pyi", ".js", ".jsx", ".ts", ".tsx", ".java", ".kt",
+            ".go", ".rs", ".rb", ".php", ".cs", ".c", ".cc", ".cpp", ".h",
+        )
+        # Search source before docs so bounded results expose code contracts.
+        files = sorted(
+            self._files(),
+            key=lambda value: (not value.lower().endswith(source_suffixes), value),
+        )
+        for relative in files:
             try:
                 with open(self._safe_path(relative), "r", encoding="utf-8", errors="replace") as handle:
                     for number, line in enumerate(handle, 1):

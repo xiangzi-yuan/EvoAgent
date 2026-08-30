@@ -319,6 +319,13 @@ class ContextManager:
             )
         if estimate_tokens(managed) > hard_input_limit:
             managed["context_policy"] = {"input_token_limit": hard_input_limit}
+        # Budget estimates include the envelope itself. Under severe pressure the
+        # two advisory counters are less valuable than repository evidence, diff
+        # metadata, candidate indices, and recalled-memory provenance.
+        for optional_key in ("remaining_time_seconds", "remaining_token_budget"):
+            if estimate_tokens(managed) <= hard_input_limit:
+                break
+            managed.pop(optional_key, None)
         stats = {
             "estimated_input_tokens_before": original_tokens,
             "estimated_input_tokens_after": estimate_tokens(managed),

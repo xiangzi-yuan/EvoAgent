@@ -1,6 +1,6 @@
 import unittest
 
-from evoagent.agentic_core import ModeRouterReviewer
+from evoagent.agentic_core import ModeRouterReviewer, _collect_evidence
 from evoagent.diff_parser import parse_unified_diff
 from evoagent.finding_policy import normalize_rule_id
 from evoagent.gates import FindingGate
@@ -92,6 +92,45 @@ class FindingPolicyTests(unittest.TestCase):
         self.assertEqual([], suggestions)
         self.assertEqual("confirmed", decisions[0]["disposition"])
 
+    def test_collaboratively_verified_repository_evidence_can_support_high_risk(self):
+        candidate = finding(severity=Severity.HIGH)
+        candidate.evidence_refs = [{
+            "evidence_id": "search_repository:contract",
+            "tool": "search_repository",
+            "output": [{"path": "app.py", "line": 2, "content": "value = None"}],
+        }]
+        published, _suggestions, _decisions = ModeRouterReviewer._partition_publication(
+            [], [candidate], [candidate],
+            [{"finding_index": 0, "publication_ready": True}],
+            repository_available=True,
+        )
+
+        result = FindingGate().apply(published, parse_unified_diff(DIFF))
+
+        self.assertEqual([candidate], result.accepted)
+        self.assertTrue(candidate.gate["collaborative_repository_verification"])
+
+    def test_lead_only_repository_search_cannot_support_high_risk(self):
+        candidate = finding(severity=Severity.HIGH)
+        candidate.evidence_refs = [{
+            "evidence_id": "search_repository:contract",
+            "tool": "search_repository",
+            "output": [{"path": "app.py", "line": 2, "content": "value = None"}],
+        }]
+        candidate.gate = {
+            "lead_selected": True,
+            "critic_publication_ready": False,
+            "publication_partition_passed": True,
+        }
+
+        result = FindingGate().apply([candidate], parse_unified_diff(DIFF))
+
+        self.assertEqual([], result.accepted)
+        self.assertIn(
+            "evidence gate: high-risk finding requires verified scanner or tool evidence",
+            result.rejected[0]["reasons"],
+        )
+
     def test_empty_repository_search_is_not_publication_evidence(self):
         candidate = finding()
         candidate.evidence_refs = [{
@@ -109,6 +148,31 @@ class FindingPolicyTests(unittest.TestCase):
         self.assertEqual([], published)
         self.assertEqual([candidate], suggestions)
         self.assertIn("no repository-backed tool evidence", decisions[0]["reasons"])
+
+    def test_truncated_preview_does_not_discard_structured_repository_facts(self):
+        output = [
+            {"path": "app.py", "line": index + 1, "content": "value " + "x" * 200}
+            for index in range(20)
+        ]
+        evidence = _collect_evidence([{
+            "tool": "search_repository", "ok": True,
+            "result": {
+                "evidence_id": "search_repository:large",
+                "tool": "search_repository", "output": output,
+            },
+        }])
+        candidate = finding()
+        candidate.evidence_refs = [evidence["search_repository:large"]]
+
+        published, suggestions, _decisions = ModeRouterReviewer._partition_publication(
+            [], [candidate], [candidate],
+            [{"finding_index": 0, "publication_ready": True}],
+            repository_available=True,
+        )
+
+        self.assertEqual([candidate], published)
+        self.assertEqual([], suggestions)
+        self.assertEqual(output, candidate.evidence_refs[0]["output"])
 
     def test_raw_high_risk_call_chain_does_not_replace_tool_evidence(self):
         candidate = finding(severity=Severity.HIGH)

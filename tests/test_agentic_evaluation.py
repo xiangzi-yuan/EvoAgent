@@ -2,6 +2,7 @@ import json
 import unittest
 
 from evoagent.diff_parser import parse_unified_diff
+from evoagent.agentic_core import BoundedRole
 from evoagent.evaluation_benchmark import ContextRuleReviewer
 from evoagent.evaluation_v2 import (
     FairAblationSuite,
@@ -11,6 +12,8 @@ from evoagent.evaluation_v2 import (
 )
 from evoagent.models import Finding, Severity
 from evoagent.reviewer import LocalRuleReviewer
+from evoagent.runtime import AgentTool, ToolRegistry
+from evoagent.telemetry import ExecutionLedger
 
 
 DIFF = (
@@ -84,6 +87,32 @@ class FakeClient:
 
 
 class AgenticEvaluationTests(unittest.TestCase):
+    def test_repository_role_cannot_finish_before_a_factual_tool_call(self):
+        class SequencedClient:
+            def __init__(self):
+                self.actions = [
+                    {"action": "final", "findings": []},
+                    {"action": "tool", "tool": "read_file", "arguments": {}},
+                    {"action": "final", "findings": []},
+                ]
+
+            def complete_json(self, *_args, **_kwargs):
+                return self.actions.pop(0)
+
+        registry = ToolRegistry([AgentTool(
+            "read_file", "Read evidence.",
+            {"type": "object", "properties": {}, "additionalProperties": False},
+            lambda: {"evidence_id": "read_file:test", "output": "value"},
+        )])
+        result = BoundedRole(
+            "correctness-reliability", "Review.", SequencedClient(),
+            token_budget=4000, time_budget=30, minimum_tool_calls=1,
+        ).run("{}", registry, ExecutionLedger("agentic"))
+
+        self.assertEqual(3, result["_steps"])
+        self.assertEqual("protocol-requirement", result["_observations"][0]["tool"])
+        self.assertTrue(result["_observations"][1]["ok"])
+
     def test_suggestion_metrics_measure_recovery_without_publishing_the_claim(self):
         suggestion = Finding(
             rule_id="CWE-502", severity=Severity.HIGH,
