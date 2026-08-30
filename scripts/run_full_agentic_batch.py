@@ -167,6 +167,10 @@ def main() -> None:
     parser.add_argument("--time-budget", type=int, default=120)
     parser.add_argument("--seed-report", default="")
     parser.add_argument(
+        "--cached-only", action="store_true",
+        help="Fail instead of calling the model when any selected case is absent from cache.",
+    )
+    parser.add_argument(
         "--suggestion-judgments", default="",
         help="Optional required/optional/invalid/duplicate adjudication JSON.",
     )
@@ -197,6 +201,12 @@ def main() -> None:
     output = os.path.abspath(args.output)
     completed = load_results(output, allowed_ids)
     completed.update(load_results(os.path.abspath(args.seed_report), allowed_ids))
+    missing_cached = [case["id"] for case in selected if case["id"] not in completed]
+    if args.cached_only and missing_cached:
+        parser.error(
+            "--cached-only is missing selected cases: %s"
+            % ", ".join(missing_cached)
+        )
 
     client = JsonChatClient(
         str(config["base_url"]), str(config["api_key"]), str(config["model"]),
@@ -208,7 +218,7 @@ def main() -> None:
     harness = ProductionEvaluationHarness()
     for case in selected:
         if case["id"] in completed:
-            harness.rescore_suggestions(completed[case["id"]], case)
+            harness.rescore_cached_result(completed[case["id"]], case)
     started = time.monotonic()
     save_report(output, build_report(
         harness, selected, completed, config, args.token_budget,

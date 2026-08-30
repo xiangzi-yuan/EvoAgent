@@ -115,11 +115,13 @@ Agentic 审查把输出分成两层，避免模型猜测污染正式指标或直
 
 建议区不能用“是否命中原始答案”直接判定对错。评测支持独立的 `suggestion_judgments`，每条判定为 `required`（数据集漏标的必修问题）、`optional`（正确但非阻塞）、`invalid`（事实错误）或 `duplicate`（重复结论）。报告同时给出建议效用率、人工判定覆盖率、干扰率和未判定数量；覆盖率不足时不得只引用效用率作结论。
 
-判定文件格式见 `examples/suggestion_judgments.example.json`；复制后需将示例案例 ID 和位置替换为待评报告中的真实值。已有模型报告可以在不再次调用 API 的情况下重新计分：
+判定文件格式见 `examples/suggestion_judgments.example.json`；复制后需将示例案例 ID 和位置替换为待评报告中的真实值。已有模型报告应使用专用的缓存重评分脚本，它不会创建模型客户端，也不会再次调用 API：
 
 ```powershell
-python scripts/run_full_agentic_batch.py pr_diff_100.jsonl --max-cases 10 --seed-report output/agentic-evaluation/model-report.json --suggestion-judgments output/agentic-evaluation/model-report-judgments.json --output output/agentic-evaluation/model-report-adjudicated.json
+python scripts/rescore_agentic_report.py pr_diff_100.jsonl output/agentic-evaluation/model-report.json --judgments output/agentic-evaluation/model-report-judgments.json --output output/agentic-evaluation/model-report-adjudicated.json
 ```
+
+`run_full_agentic_batch.py --cached-only` 也会在缓存缺少任何选中案例时直接失败，避免标签修订改变抽样集合后意外产生新的模型调用。
 
 只提交 unified diff 时，模型能够分析新增行，但无法证明跨文件调用关系。若要审查隐藏逻辑、调用方和测试影响，需要同时传入服务进程可读取的绝对仓库路径：
 
@@ -133,6 +135,33 @@ python scripts/run_full_agentic_batch.py pr_diff_100.jsonl --max-cases 10 --seed
 ```
 
 Docker 部署时，`repository_root` 必须是容器内路径，并且对应仓库应以只读卷挂载。当前受控 100 条数据集只包含 diff、不包含完整 checkout，因此模型新增结论会进入 `suggestions`；这类实验能验证执行链和增量价值，不能证明跨仓库语义审查能力。
+
+### 人工确认后的 v2 基线
+
+`pr_diff_100_v2.jsonl` 不覆盖原始 v1。它由 `benchmarks/adjudications/deepseek-v4-flash-10.confirmed.json` 生成，将人工确认的 5 条漏标问题加入必修答案，同时保留 3 条 optional。来源哈希、新增标签和生成结果记录在 `benchmarks/pr_diff_100_v2.manifest.json`。
+
+```powershell
+python scripts/promote_suggestion_judgments.py pr_diff_100.jsonl benchmarks/adjudications/deepseek-v4-flash-10.confirmed.json --output pr_diff_100_v2.jsonl --manifest benchmarks/pr_diff_100_v2.manifest.json
+python scripts/run_rule_evaluation.py pr_diff_100_v2.jsonl --rules 14 --output output/agentic-evaluation/rules-14-pr-diff-100-v2.json
+python scripts/rescore_agentic_report.py pr_diff_100_v2.jsonl output/agentic-evaluation/deepseek-v4-flash-10-suggestion-metrics.json --judgments benchmarks/adjudications/deepseek-v4-flash-10.confirmed.json --output output/agentic-evaluation/deepseek-v4-flash-10-v2-confirmed.json
+```
+
+| v2 实验 | 案例 | Precision | Recall | F1 | 高风险召回 | 干净准确率 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 6 条确定性规则 | 100 | 100% | 55.56% | 71.43% | 66.67% | 100% |
+| 14 条确定性规则 | 100 | 100% | 73.33% | 84.61% | 75.00% | 100% |
+| DeepSeek 四角色正式 Finding（缓存 10 条） | 10 | 66.67% | 40.00% | 50.00% | 33.33% | 100% |
+
+同一 10 条中的 12 条建议经人工确认后，建议效用率为 75%，Finding 与经确认建议的综合必修召回率为 100%。这个综合召回率包含人工 Gate，不能表述为“模型自动发布召回率”。机器可读结果见 `benchmarks/pr_diff_100_v2_baselines.json`。
+
+真实 PR 的下一阶段必须为每条 manifest 提供人工 `expected_findings`，并把 `repository_root` 指向已经 checkout 到该 PR **head SHA** 的绝对路径，格式见 `benchmarks/real_pr_manifest.example.jsonl`。导入器会向 GitHub 核对 SHA，路径错、分支错或 checkout 缺失都会拒绝生成评测集：
+
+```powershell
+python scripts/import_github_pr_dataset.py benchmarks/real-pr-10.manifest.jsonl output/real-pr-10.jsonl --limit 10 --require-checkout
+python scripts/run_real_pr_benchmark.py output/real-pr-10.jsonl --minimum 10
+```
+
+正式对照实验应对同一批案例分别移除和保留 `repository_root`，比较“仅 Diff”与“Diff + 完整仓库 + 四角色工具”的召回、误报、成本和延迟，不能用两批不同 PR 横向比较。
 
 项目启动时会自动读取项目根目录的 `.env`，也兼容 `evoagent/.env`；系统环境变量优先于 `.env` 文件。推荐将以下内容写入根目录 `.env`（该文件已被 `.gitignore` 忽略）：
 

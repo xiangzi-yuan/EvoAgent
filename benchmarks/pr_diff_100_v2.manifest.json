@@ -1,0 +1,79 @@
+{
+  "cases": 100,
+  "explicit_judgments": 10,
+  "judged_cases": 8,
+  "judgments": "benchmarks/adjudications/deepseek-v4-flash-10.confirmed.json",
+  "judgments_sha256": "23cac20dcfa59fc266b15ad9f15d4fac7051609bad4b53351e89d3e2e592f8d1",
+  "output": "pr_diff_100_v2.jsonl",
+  "required_label_additions": [
+    {
+      "case_id": "pr-0002",
+      "cwe": "CWE-252",
+      "end_line": 4,
+      "label_source": "confirmed-suggestion-adjudication",
+      "path": "src/change_11.py",
+      "rule_id": "CWE-252",
+      "severity": "high",
+      "should_comment": true,
+      "start_line": 4
+    },
+    {
+      "case_id": "pr-0005",
+      "cwe": "CWE-758",
+      "end_line": 3,
+      "label_source": "confirmed-suggestion-adjudication",
+      "path": "src/clean_01.py",
+      "rule_id": "CWE-758",
+      "severity": "high",
+      "should_comment": true,
+      "start_line": 3
+    },
+    {
+      "case_id": "pr-0081",
+      "cwe": "CWE-704",
+      "end_line": 4,
+      "label_source": "confirmed-suggestion-adjudication",
+      "path": "src/change_09.py",
+      "rule_id": "CWE-704",
+      "severity": "high",
+      "should_comment": true,
+      "start_line": 4
+    },
+    {
+      "case_id": "pr-0085",
+      "cwe": "CWE-758",
+      "end_line": 2,
+      "label_source": "confirmed-suggestion-adjudication",
+      "path": "src/clean_09.py",
+      "rule_id": "CWE-758",
+      "severity": "high",
+      "should_comment": true,
+      "start_line": 2
+    },
+    {
+      "case_id": "pr-0086",
+      "cwe": "CWE-758",
+      "end_line": 2,
+      "label_source": "confirmed-suggestion-adjudication",
+      "path": "src/clean_19.py",
+      "rule_id": "CWE-758",
+      "severity": "high",
+      "should_comment": true,
+      "start_line": 2
+    }
+  ],
+  "required_labels_added": 5,
+  "reviewed_at": "2026-08-30",
+  "reviewed_suggestions": 12,
+  "reviewer": "project-owner-confirmed",
+  "revised_dataset_sha256": "9e23b7a4d12cc99b99870dfb6d58f9921783bededb335c0085e15cf4f56787f4",
+  "schema_version": 1,
+  "source_dataset": "pr_diff_100.jsonl",
+  "source_dataset_sha256": "88831bb19264f9fc15433de7801b623aad38b80076f5d5b085d0299fd40cc115",
+  "status": "confirmed",
+  "verdicts": {
+    "duplicate": 2,
+    "optional": 3,
+    "required": 5
+  }
+}

@@ -1,0 +1,1 @@
+{"expected_findings":[{"cwe":"CWE-476","end_line":42,"path":"src/example.py","rule_id":"CWE-476","severity":"high","should_comment":true,"start_line":42}],"id":"owner/repository#123","pull_request":123,"repair_validation":{},"repository":"owner/repository","repository_root":"D:\\checkouts\\repository-pr-123","split":"validation"}

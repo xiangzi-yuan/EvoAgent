@@ -382,6 +382,66 @@ class ProductionEvaluationHarness(EndToEndEvaluationHarness):
         suggestions = self._restore_findings(result.get("suggested_findings") or [])
         return self._score_suggestions(result, case, findings, suggestions)
 
+    def rescore_cached_result(self, result, case):
+        """Re-score formal and suggestion layers after a dataset label revision."""
+        expected = [
+            item for item in case["expected_findings"]
+            if bool(item.get("should_comment", True))
+        ]
+        findings = self._restore_findings(result.get("predicted_findings") or [])
+        suggestions = self._restore_findings(result.get("suggested_findings") or [])
+        matches = one_to_one_match(expected, findings, self.line_tolerance)
+        result.update({
+            "expected": len(expected),
+            "predicted": len(findings),
+            "tp": len(matches),
+            "fp": len(findings) - len(matches),
+            "fn": len(expected) - len(matches),
+            "severity_hits": 0,
+            "high_total": sum(
+                str(item["severity"]).lower() in {"high", "critical"}
+                for item in expected
+            ),
+            "high_hits": 0,
+            "clean_hit": not expected and not findings,
+            "expected_findings": expected,
+            "predicted_findings": [item.to_dict() for item in findings],
+            "matches": [],
+            "invalid_comments": len(findings) - len(matches),
+            "exact_location_hits": 0,
+            "evidence_hits": 0,
+            # Cached repair evidence is tied to the old truth set and cannot be
+            # promoted safely without executing the repair verifier again.
+            "repair_attempted": 0,
+            "repair_passed": 0,
+            "repair": [],
+            "e2e_success": False,
+        })
+        for match in matches:
+            truth = expected[match.expected_index]
+            finding = findings[match.predicted_index]
+            severity_hit = finding.severity.value == str(truth["severity"]).lower()
+            high = str(truth["severity"]).lower() in {"high", "critical"}
+            result["severity_hits"] += int(severity_hit)
+            result["high_hits"] += int(high)
+            result["exact_location_hits"] += int(match.location_distance == 0)
+            result["evidence_hits"] += int(bool(
+                finding.evidence_refs or finding.call_chain or finding.evidence.strip()
+            ))
+            result["matches"].append({
+                "expected_index": match.expected_index,
+                "predicted_index": match.predicted_index,
+                "path": finding.path,
+                "line": finding.line,
+                "cwe": RULE_TO_CWE.get(finding.rule_id, finding.rule_id),
+                "rule_id": finding.rule_id,
+                "expected_severity": truth["severity"],
+                "predicted_severity": finding.severity.value,
+                "severity_hit": severity_hit,
+                "location_distance": match.location_distance,
+            })
+        return self._score_suggestions(result, case, findings, suggestions)
+
     def _run_case(self, reviewer, case):
         class RecordingReviewer:
             def __init__(self, delegate):

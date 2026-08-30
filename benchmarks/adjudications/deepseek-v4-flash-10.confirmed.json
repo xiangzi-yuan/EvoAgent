@@ -1,0 +1,108 @@
+{
+  "schema_version": 1,
+  "status": "confirmed",
+  "reviewer": "project-owner-confirmed",
+  "reviewed_at": "2026-08-30",
+  "reviewed_suggestions": 12,
+  "auto_matched_required_suggestions": 2,
+  "source_report": "deepseek-v4-flash-10-suggestion-metrics.json",
+  "source_report_sha256": "4902a96b8912d0545bb1a9a5971bd8f100439671265fe213a7ee358f5e129ac8",
+  "cases": {
+    "pr-0005": [
+      {
+        "path": "src/clean_01.py",
+        "line": 3,
+        "rule_id": "CWE-758",
+        "severity": "high",
+        "verdict": "required",
+        "note": "The complete after_files fixture has no hashlib import, so calling process raises NameError. The original clean label is incomplete."
+      }
+    ],
+    "pr-0081": [
+      {
+        "path": "src/change_09.py",
+        "line": 4,
+        "rule_id": "CWE-704",
+        "severity": "high",
+        "verdict": "required",
+        "note": "The diff changes the established return contract from str(value) to the original value; this is a separate correctness regression from the labelled secret."
+      }
+    ],
+    "pr-0085": [
+      {
+        "path": "src/clean_09.py",
+        "line": 2,
+        "rule_id": "CWE-758",
+        "severity": "high",
+        "verdict": "required",
+        "note": "The complete after_files fixture references hashlib without importing it, producing a deterministic NameError."
+      }
+    ],
+    "pr-0002": [
+      {
+        "path": "src/change_11.py",
+        "line": 4,
+        "rule_id": "CWE-252",
+        "severity": "high",
+        "verdict": "required",
+        "note": "The function previously returned normalized str(value) and now returns the raw value, breaking its observable return contract."
+      }
+    ],
+    "pr-0006": [
+      {
+        "path": "src/clean_11.py",
+        "line": 2,
+        "rule_id": "CWE-252",
+        "severity": "high",
+        "verdict": "optional",
+        "note": "The unused clamp and new conversion exception path are real, but merge relevance depends on intended inputs and callers."
+      },
+      {
+        "path": "src/clean_11.py",
+        "line": 2,
+        "rule_id": "CWE-248",
+        "severity": "medium",
+        "verdict": "duplicate",
+        "note": "This repeats the same conversion/unused-value concern and adds an unproven denial-of-service framing."
+      }
+    ],
+    "pr-0082": [
+      {
+        "path": "src/change_19.py",
+        "line": 4,
+        "rule_id": "CWE-561",
+        "severity": "high",
+        "verdict": "optional",
+        "note": "The second return is definitely unreachable, but removing dead code is non-blocking beside the required unsafe-deserialization defect."
+      }
+    ],
+    "pr-0086": [
+      {
+        "path": "src/clean_19.py",
+        "line": 2,
+        "rule_id": "CWE-758",
+        "severity": "high",
+        "verdict": "required",
+        "note": "The complete after_files fixture contains no hashlib import, so the new line deterministically raises NameError."
+      }
+    ],
+    "pr-0007": [
+      {
+        "path": "src/clean_21.py",
+        "line": 2,
+        "rule_id": "CWE-252",
+        "severity": "medium",
+        "verdict": "optional",
+        "note": "The computed clamp is unused and introduces a conversion exception path, but caller intent is unavailable."
+      },
+      {
+        "path": "src/clean_21.py",
+        "line": 2,
+        "rule_id": "CWE-20",
+        "severity": "low",
+        "verdict": "duplicate",
+        "note": "This is the same concern as the optional unused-clamp suggestion and should not receive a second utility credit."
+      }
+    ]
+  }
+}

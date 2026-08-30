@@ -1,0 +1,67 @@
+{
+  "schema_version": 1,
+  "dataset": "pr_diff_100_v2.jsonl",
+  "dataset_sha256": "9e23b7a4d12cc99b99870dfb6d58f9921783bededb335c0085e15cf4f56787f4",
+  "labels": {
+    "required": 45,
+    "optional": 3,
+    "confirmed_required_additions": 5
+  },
+  "results": {
+    "deterministic_6_rule": {
+      "cases": 100,
+      "model_calls": 0,
+      "tp": 25,
+      "fp": 0,
+      "fn": 20,
+      "precision": 1.0,
+      "recall": 0.5556,
+      "f1": 0.7143,
+      "high_risk_recall": 0.6667,
+      "clean_accuracy": 1.0
+    },
+    "deterministic_14_rule": {
+      "cases": 100,
+      "model_calls": 0,
+      "tp": 33,
+      "fp": 0,
+      "fn": 12,
+      "precision": 1.0,
+      "recall": 0.7333,
+      "f1": 0.8461,
+      "high_risk_recall": 0.75,
+      "clean_accuracy": 1.0
+    },
+    "deepseek_v4_flash_full_agentic_cached_10": {
+      "cases": 10,
+      "rescore_model_calls": 0,
+      "historical_model_calls": 140,
+      "formal": {
+        "tp": 4,
+        "fp": 2,
+        "fn": 6,
+        "precision": 0.6667,
+        "recall": 0.4,
+        "f1": 0.5,
+        "high_risk_recall": 0.3333,
+        "clean_accuracy": 1.0
+      },
+      "confirmed_suggestions": {
+        "suggestions": 12,
+        "useful": 9,
+        "optional": 3,
+        "invalid": 0,
+        "duplicate": 3,
+        "adjudication_coverage": 1.0,
+        "utility_rate": 0.75,
+        "nuisance_rate": 0.25,
+        "combined_required_recall_after_verification": 1.0
+      }
+    }
+  },
+  "limitations": [
+    "The 100-case dataset is synthetic-controlled and has no full repository checkout.",
+    "The cached Agentic result covers 10 cases, not the full 100-case dataset.",
+    "Combined recall includes human-confirmed suggestions and is not autonomous publication recall."
+  ]
+}

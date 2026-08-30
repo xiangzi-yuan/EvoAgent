@@ -190,6 +190,43 @@ class AgenticEvaluationTests(unittest.TestCase):
         self.assertEqual(0.75, metrics["suggestion_adjudication_coverage"])
         self.assertEqual(0.6667, metrics["suggestion_nuisance_rate"])
 
+    def test_cached_result_rescore_updates_formal_truth_after_label_revision(self):
+        formal = Finding(
+            rule_id="CWE-95", severity=Severity.CRITICAL,
+            title="eval", explanation="Dynamic execution.", path="app.py", line=1,
+            evidence="eval(value)", fix="Remove eval.", test="Add an injection test.",
+        )
+        suggestion = Finding(
+            rule_id="CWE-476", severity=Severity.HIGH,
+            title="none", explanation="None dereference.", path="app.py", line=2,
+            evidence="value.name", fix="Guard value.", test="Add a None test.",
+            disposition="suggestion",
+        )
+        case = {
+            "expected_findings": [
+                {
+                    "path": "app.py", "start_line": 1, "end_line": 1,
+                    "cwe": "CWE-95", "severity": "critical", "should_comment": True,
+                },
+                {
+                    "path": "app.py", "start_line": 2, "end_line": 2,
+                    "cwe": "CWE-476", "severity": "high", "should_comment": True,
+                },
+            ],
+        }
+        cached = {
+            "predicted_findings": [formal.to_dict()],
+            "suggested_findings": [suggestion.to_dict()],
+            "matches": [],
+        }
+
+        rescored = ProductionEvaluationHarness().rescore_cached_result(cached, case)
+
+        self.assertEqual((1, 0, 1), (rescored["tp"], rescored["fp"], rescored["fn"]))
+        self.assertEqual(1, rescored["incremental_suggestion_tp"])
+        self.assertEqual(2, rescored["combined_tp_after_verification"])
+        self.assertEqual(2, len(rescored["expected_findings"]))
+
     def test_agentic_arms_share_exactly_fourteen_rules_and_real_role_topologies(self):
         self.assertEqual(14, len(LocalRuleReviewer.RULES) + len(ContextRuleReviewer.RULES))
         expected_calls = {
