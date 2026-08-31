@@ -602,6 +602,8 @@ class ProductionEvaluationHarness(EndToEndEvaluationHarness):
             "total_tokens": 0,
             "model_roles": {},
             "agentic_summary": {},
+            "worker_failures": 0,
+            "degraded_execution": False,
             "suggestions": 0,
             "suggested_findings": [],
             "suggestion_tp": 0,
@@ -650,6 +652,12 @@ class ProductionEvaluationHarness(EndToEndEvaluationHarness):
             summary_reader = getattr(reviewer, "evaluation_summary", None)
             if summary_reader:
                 result["agentic_summary"] = summary_reader() or {}
+                failed_workers = [
+                    item for item in result["agentic_summary"].get("worker_results") or []
+                    if isinstance(item, dict) and item.get("status") == "failed"
+                ]
+                result["worker_failures"] = len(failed_workers)
+                result["degraded_execution"] = bool(failed_workers)
                 result["suggestions"] = int(
                     result["agentic_summary"].get("suggestion_count", 0) or 0
                 )
@@ -683,6 +691,7 @@ class ProductionEvaluationHarness(EndToEndEvaluationHarness):
             "formal_unjudged_findings": 0, "formal_adjudicated": 0,
             "formal_useful_findings": 0,
             "targeted_label_cases": 0,
+            "worker_failures": 0, "degraded_cases": 0,
         })
         return values
 
@@ -703,8 +712,10 @@ class ProductionEvaluationHarness(EndToEndEvaluationHarness):
             "formal_invalid_findings", "formal_duplicate_findings",
             "formal_unjudged_findings", "formal_adjudicated",
             "formal_useful_findings",
+            "worker_failures",
         ):
             totals[field] += int(result.get(field, 0))
+        totals["degraded_cases"] += int(result.get("degraded_execution", False))
         totals["targeted_label_cases"] += int(
             result.get("label_completeness") == "targeted-review-comments"
         )
@@ -819,6 +830,9 @@ class ProductionEvaluationHarness(EndToEndEvaluationHarness):
             "failure_rate": round(
                 1 - totals["execution_successes"] / cases, 4
             ),
+            "worker_failures": totals["worker_failures"],
+            "degraded_execution_rate": round(totals["degraded_cases"] / cases, 4),
+            "full_role_success_rate": round(1 - totals["degraded_cases"] / cases, 4),
         })
         return values
 

@@ -19,7 +19,7 @@ from .finding_policy import (
     normalize_rule_id,
     repository_evidence_refs,
 )
-from .context_manager import ContextManager
+from .context_manager import ContextManager, estimate_tokens
 from .gates import FindingGate
 from .llm import JsonChatClient
 from .models import ComponentKind, Finding, Severity
@@ -66,7 +66,10 @@ Return JSON only. Tool action:
 Final action: {"action":"final","findings":[{"rule_id":"...","severity":"critical|high|medium|low",
 "title":"...","explanation":"...","path":"...","line":1,"evidence":"exact code",
 "evidence_ids":["tool:id"],"call_chain":[{"path":"...","line":1,"symbol":"..."}],
-"fix":"...","test":"...","confidence":0.0,"skill":"active-skill-name-or-empty"}]}"""
+"fix":"...","test":"...","confidence":0.0,"skill":"active-skill-name-or-empty"}],
+"evidence_resolutions":[{"evidence_id":"tool:id","status":"finding|refuted",
+"explanation":"why the fixed counterexample applies or cannot occur",
+"supporting_evidence_ids":["repository-tool:id"]}]}"""
 
 RELIABILITY_PROMPT = """You are the Correctness/Reliability Agent. Inspect state transitions,
 exceptions, concurrency, resource lifetime, compatibility and related tests. Report only defects
@@ -86,8 +89,14 @@ CRITIC_PROMPT = """You are the Critic worker performing a blind review for the L
 are removed. Your primary job is to prevent false-positive PR comments. Search for counterexamples,
 wrong locations, pre-existing behavior, missing preconditions and unsupported severity. A quoted diff
 line proves only that text exists; it does not prove the claimed bug. Independently use repository tools
-when a semantic claim needs context. Never create new findings. If context is unavailable or the trigger
-cannot be established, reject the candidate for publication rather than speculate.
+when a semantic claim needs context. Never reject a candidate merely because the token-bounded diff view
+omitted its exact hunk: first call changed_line for the candidate path and line, then inspect nearby source
+or tests as needed. Omission is not counter-evidence. Never create new findings. If context is unavailable
+or the trigger cannot be established after those checks, reject the candidate rather than speculate.
+Tests and documentation added or modified by the same PR are part of the proposition under review, not
+independent proof that the behavior is correct: they may encode the same regression. Do not reject solely
+because a new test asserts the behavior or a new doc describes it; require a pre-existing contract or other
+independent counter-evidence, and explicitly examine contradictions between neighboring branches.
 Return JSON only. Tool action: {"action":"tool","tool":"name","arguments":{},"reason":"..."}
 Final action: {"action":"final","decisions":[{"finding_index":0,"accepted":true,
 "introduced_by_diff":true,"reproducible":true,"evidence_sufficient":true,
@@ -96,7 +105,10 @@ Final action: {"action":"final","decisions":[{"finding_index":0,"accepted":true,
 
 RULE_ID_GUIDANCE = (
     "\nRule IDs: reuse a scanner ID; else use CWE-ID or a descriptive ID, never SEC-001. "
-    "Set skill only when that active Skill supplied the rule.\n"
+    "For swallowed or silently converted exceptions use CWE-703; use CWE-252 only when a caller "
+    "fails to inspect a returned status. Cite the exact added statement that creates the behavior, "
+    "not merely the enclosing function, try, or except header. Set skill only when that active Skill "
+    "supplied the rule.\n"
 )
 
 ROLE_PERMISSIONS = {
@@ -183,6 +195,17 @@ class BoundedRole:
             output_allowance = self.context_manager.output_token_limit(
                 self.prompt, min(4000, max(256, self.token_budget - used))
             )
+            tool_catalog = tools.catalog()
+            output_allowance = min(
+                output_allowance,
+                max(
+                    128,
+                    self.context_manager.context_window_tokens
+                    - estimate_tokens(self.prompt)
+                    - estimate_tokens(tool_catalog)
+                    - 900,
+                ),
+            )
             current_context = user_context
             if self.working_memory_supplier is not None:
                 try:
@@ -196,7 +219,7 @@ class BoundedRole:
                         self.name, "working_memory_unavailable", error=str(exc)[:500],
                     )
             managed, context_stats = self.context_manager.build_managed_context(
-                current_context, tools.catalog(), observations,
+                current_context, tool_catalog, observations,
                 max(0, self.token_budget - used),
                 max(0, int(self.time_budget - elapsed)),
                 system_prompt=self.prompt, max_output_tokens=output_allowance,
@@ -232,6 +255,59 @@ class BoundedRole:
                     ledger.trace(
                         self.name, "minimum_tool_calls_not_met", step=step,
                         required=self.minimum_tool_calls, completed=successful_tools,
+                    )
+                    continue
+                required_evidence = {}
+                for item in observations:
+                    result = item.get("result")
+                    if not isinstance(result, dict):
+                        continue
+                    output = result.get("output")
+                    if isinstance(output, dict) and output.get("requires_resolution"):
+                        evidence_id = str(result.get("evidence_id", ""))
+                        if evidence_id:
+                            required_evidence[evidence_id] = str(
+                                output.get("resolution_question", "Resolve the counterexample.")
+                            )
+                successful_evidence = {
+                    str(item.get("result", {}).get("evidence_id", ""))
+                    for item in observations
+                    if item.get("ok") and isinstance(item.get("result"), dict)
+                }
+                resolved = set()
+                for item in action.get("evidence_resolutions") or []:
+                    if not isinstance(item, dict):
+                        continue
+                    evidence_id = str(item.get("evidence_id", ""))
+                    supporting = {
+                        str(value) for value in item.get("supporting_evidence_ids") or []
+                    }
+                    if (
+                        str(item.get("status", "")) == "refuted"
+                        and str(item.get("explanation", "")).strip()
+                        and any(
+                            value in successful_evidence and value != evidence_id
+                            for value in supporting
+                        )
+                    ):
+                        resolved.add(evidence_id)
+                for finding in action.get("findings") or []:
+                    if isinstance(finding, dict):
+                        resolved.update(str(value) for value in finding.get("evidence_ids") or [])
+                unresolved = sorted(set(required_evidence) - resolved)
+                if unresolved:
+                    observations.append({
+                        "step": step, "tool": "protocol-requirement", "ok": False,
+                        "error": (
+                            "Resolve each fixed counterexample before finishing. Return a finding "
+                            "that cites its evidence_id, or evidence_resolutions with status "
+                            "refuted and repository-backed reasoning. Unresolved: "
+                            + ", ".join(unresolved)
+                        ),
+                    })
+                    ledger.trace(
+                        self.name, "counterexample_resolution_missing", step=step,
+                        unresolved=unresolved,
                     )
                     continue
                 action["_observations"] = observations
@@ -722,6 +798,7 @@ class ModeRouterReviewer(Reviewer):
                     **self._model_diff(
                         diff, task_id, "lead:finalize",
                         focus_files=[item.path for item in candidates],
+                        focus_locations=[(item.path, item.line) for item in candidates],
                     ),
                     "candidate_findings": [
                         {"finding_index": index, **item.to_dict()}
@@ -798,10 +875,11 @@ class ModeRouterReviewer(Reviewer):
 
     def _model_diff(
         self, diff, context_key, label, focus_files=(), risk_domains=(),
+        focus_locations=(),
     ):
         compressed = self.context_manager.compress_diff(
             diff, context_key, label, focus_files=focus_files,
-            risk_domains=risk_domains,
+            risk_domains=risk_domains, focus_locations=focus_locations,
         )
         return {
             "diff": self.context_manager.render_diff_view(compressed),
@@ -918,7 +996,41 @@ class ModeRouterReviewer(Reviewer):
             context_manager=self.context_manager,
             working_memory_supplier=working_memory_supplier,
             observation_sink=observation_sink,
+            minimum_tool_calls=int(bool(candidates)),
         )
+        tools = suite.registry("critic", ROLE_PERMISSIONS["critic"])
+        initial_observations = []
+        seen_locations = set()
+        for index, item in enumerate(candidates):
+            location = (item.path, item.line)
+            if location in seen_locations or len(seen_locations) >= 12:
+                continue
+            seen_locations.add(location)
+            for tool_name, arguments in (
+                ("changed_line", {"path": item.path, "line": item.line}),
+                ("read_file", {
+                    "path": item.path,
+                    "start_line": max(1, item.line - 12),
+                    "end_line": item.line + 12,
+                }),
+            ):
+                if tool_name not in tools.names():
+                    continue
+                if tool_name == "read_file" and not suite.repository_available:
+                    continue
+                try:
+                    value = tools.invoke(tool_name, arguments)
+                    initial_observations.append({
+                        "step": 0, "tool": tool_name, "ok": True,
+                        "result": value,
+                        "reason": "candidate %d exact-location verification" % index,
+                    })
+                except Exception as exc:
+                    initial_observations.append({
+                        "step": 0, "tool": tool_name, "ok": False,
+                        "error": str(exc)[:1000],
+                        "reason": "candidate %d exact-location verification" % index,
+                    })
         return role.run(
             json.dumps({
                 "lead_assignment": objective or (
@@ -927,11 +1039,12 @@ class ModeRouterReviewer(Reviewer):
                 **self._model_diff(
                     diff, context_key, "critic:blind-review",
                     focus_files=[item.path for item in candidates],
+                    focus_locations=[(item.path, item.line) for item in candidates],
                 ),
                 "candidates": blinded,
                 "recalled_memory": memory_context or {"items": []},
             }, ensure_ascii=False),
-            suite.registry("critic", ROLE_PERMISSIONS["critic"]), ledger,
+            tools, ledger, initial_observations=initial_observations,
         )
 
     def _run_pending_assignments(
@@ -1039,15 +1152,30 @@ class ModeRouterReviewer(Reviewer):
                         if name in (available_skills or {})
                         and available_skills[name].source == "evolved-db"
                     }
+                    raw_result = future.result()
                     findings = _parse_findings(
-                        future.result(), parsed, assignment["worker"],
+                        raw_result, parsed, assignment["worker"],
                         validated_skill_names,
                     )
+                    resolutions = [
+                        {
+                            "evidence_id": str(item.get("evidence_id", ""))[:200],
+                            "status": str(item.get("status", ""))[:40],
+                            "explanation": str(item.get("explanation", ""))[:2000],
+                            "supporting_evidence_ids": [
+                                str(value)[:200]
+                                for value in item.get("supporting_evidence_ids") or []
+                            ][:20],
+                        }
+                        for item in raw_result.get("evidence_resolutions") or []
+                        if isinstance(item, dict)
+                    ][:20]
                     result = {
                         "assignment_id": assignment["assignment_id"],
                         "run_id": run_id, "worker": assignment["worker"],
                         "revision_round": revision_round, "status": "completed",
                         "findings": [item.to_dict() for item in findings], "error": "",
+                        "evidence_resolutions": resolutions,
                     }
                 except Exception as exc:
                     result = {
@@ -1076,7 +1204,7 @@ class ModeRouterReviewer(Reviewer):
             "__eq__", "__ne__", "classmethod", "staticmethod", "except",
             "hasattr", "len(", "model_dump", "none", "pop(", "replace(",
             "secret", "token", "validation_alias", "warn(", "warning",
-            "weakref", "_gc_cycle", "redirect", "normalize", "decode",
+            "weakref", "_gc_cycle", "redirect", "normalize", "decode", "__getattr__",
             "environment(", "sandboxedenvironment", "_inline_env",
         }
 
@@ -1099,25 +1227,37 @@ class ModeRouterReviewer(Reviewer):
             "info", "logger", "warning", "warn",
         }
         observations = []
-        selected = added[0] if added else None
-        if repository_available and selected and "read_file" in tools.names():
-            try:
-                value = tools.invoke("read_file", {
-                    "path": selected.path,
-                    "start_line": max(1, selected.line - 25),
-                    "end_line": selected.line + 25,
-                })
-                observations.append({
-                    "step": 0, "tool": "read_file", "ok": True, "result": value,
-                    "reason": "evidence-first risk-ranked source context",
-                })
-            except Exception as exc:
-                observations.append({
-                    "step": 0, "tool": "read_file", "ok": False,
-                    "error": str(exc)[:1000],
-                })
+        selected_regions = []
+        seen_regions = set()
+        for item in added:
+            region = (item.path, max(0, (item.line - 1) // 40))
+            if region in seen_regions:
+                continue
+            seen_regions.add(region)
+            selected_regions.append(item)
+            if len(selected_regions) >= 3:
+                break
+        selected = selected_regions[0] if selected_regions else None
+        if repository_available and selected_regions and "read_file" in tools.names():
+            for region_item in selected_regions:
+                try:
+                    value = tools.invoke("read_file", {
+                        "path": region_item.path,
+                        "start_line": max(1, region_item.line - 25),
+                        "end_line": region_item.line + 25,
+                    })
+                    observations.append({
+                        "step": 0, "tool": "read_file", "ok": True, "result": value,
+                        "reason": "evidence-first risk-ranked source context",
+                    })
+                except Exception as exc:
+                    observations.append({
+                        "step": 0, "tool": "read_file", "ok": False,
+                        "error": str(exc)[:1000],
+                    })
         queries = []
         cross_file_hit = None
+        text = ""
         if selected:
             nearby = [
                 item.content for item in added
@@ -1202,7 +1342,11 @@ class ModeRouterReviewer(Reviewer):
                     "error": str(exc)[:1000],
                 })
         probe_kinds = []
-        lowered = text.lower()
+        # Probe all bounded added text rather than only the first selected
+        # region; large PRs commonly place the relevant contract in a later
+        # hunk of the same file.
+        semantic_text = "\n".join(item.content for item in added[:500])
+        lowered = semantic_text.lower()
         if any(token in lowered for token in ("filepath.join", "os.path.join")) and any(
             token in lowered for token in ("repodir", "repository", "base", "path")
         ):
@@ -1241,10 +1385,18 @@ class ModeRouterReviewer(Reviewer):
             probe_kinds.append("self-cycle-collection")
         if "validate_by_alias" in lowered and "validation_alias" in lowered:
             probe_kinds.append("alias-configuration-direction")
+        if "def __getattr__" in lowered and any(
+            token in lowered for token in ("deprecated", "warnings.warn", "deprecationwarning")
+        ):
+            probe_kinds.append("module-getattr-alias-bypass")
         if "_missing" in lowered and "default" in lowered:
-            probe_kinds.append("tri-state-boolean")
+            probe_kinds.append("sentinel-error-propagation")
+        if "len(" in lowered and re.search(
+            r"len\(\s*[a-z_][a-z0-9_]*\.[a-z_][a-z0-9_]*", lowered,
+        ):
+            probe_kinds.append("nullable-length")
         if selected and "semantic_probe" in tools.names():
-            for kind in probe_kinds[:2]:
+            for kind in probe_kinds[:3]:
                 try:
                     value = tools.invoke("semantic_probe", {"kind": kind})
                     observations.append({

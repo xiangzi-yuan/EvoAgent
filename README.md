@@ -195,6 +195,12 @@ python scripts/run_full_agentic_batch.py output/real-pr-reviewed-10-targeted-v2.
 
 提交 `24af53c` 的统一 10 PR 重跑执行成功率为 90%（mypy 案例收到模型截断 JSON），目标 Review 召回 10%。人工复核全部 6 条额外正式 Finding 后均判为无效，因此正式层人工裁决精度为 14.29%、噪声率为 85.71%；8 条建议中 4 条 optional、4 条 invalid，建议效用率为 50%。该次运行共记录 926,071 tokens。结果证明单纯增加探针仍不足：SQLModel 探针虽然执行了，Lead 的 workflow 导向任务却淹没了生产源码结论。后续任务分解已改为给未覆盖生产源码创建独立 `correctness-source-coverage` assignment，避免只把源码路径附加到不相关的 workflow 任务。
 
+### 低风险 Python 正确性 PR 集
+
+当前主动开发集合改为 `benchmarks/python_correctness_public_pr_v1.json` 中的 6 条公开原始方向 PR，只覆盖空值、异常语义、比较/装饰器协议、弃用兼容和三态配置。它明确排除安全修复反转、漏洞利用、逆向、凭据处理和攻击工具；评测只读 checkout，不运行被审仓库代码或测试。
+
+本轮开发检查点中，mypy 装饰器顺序案例形成正式命中，Pydantic 三态别名案例进入 Suggestion 并在人工验证后命中；Flask、Werkzeug、Click 仍有语义或证据链漏报，Rich 因畸形 JSON 记为执行失败。机器可读记录见 `benchmarks/python_correctness_public_pr_v1_checkpoint.json`。这些运行跨越多个实现修改，只用于诊断；发布指标必须在同一 commit 上统一重跑 6 条后再计算。
+
 ### L0 明显严重缺陷冒烟集
 
 `benchmarks/obvious_severe_smoke.jsonl` 用于回答更窄的产品问题：系统能否稳定发现 Diff 中最明显、最严重且有公开证据的主缺陷。它包含 1 条真实坏 PR（命令注入）和 2 条公开安全修复的反向回归回放（JWT 不验签、路径穿越）。反向回放均显式标注 `public-security-fix-reversal`，不能表述为原修复 PR 自己引入了漏洞，也不能用这个 3 条集合估计真实生产 Precision。

@@ -379,6 +379,42 @@ class RepositoryToolSuite:
                      "is_false": value is False}
                     for value in (None, False, True)
                 ],
+                "network_used": False,
+                "arbitrary_code_executed": False,
+            })
+        if kind == "nullable-length":
+            value = None
+            error_type = ""
+            try:
+                len(value)
+            except TypeError as exc:
+                error_type = type(exc).__name__
+            return _evidence("semantic_probe", {
+                "kind": kind,
+                "operation": "apply-len-to-an-optional-attribute-value",
+                "value": None,
+                "raises_when_value_is_none": error_type == "TypeError",
+                "error_type": error_type,
+                "network_used": False,
+                "filesystem_read": False,
+                "arbitrary_code_executed": False,
+            })
+        if kind == "sentinel-error-propagation":
+            missing = object()
+            conversion_failed = False
+            try:
+                result = int("not-an-integer")
+            except (TypeError, ValueError):
+                conversion_failed = True
+                result = missing
+            return _evidence("semantic_probe", {
+                "kind": kind,
+                "operation": "conversion-error-falls-through-to-missing-sentinel",
+                "conversion_failed": conversion_failed,
+                "returned_missing_sentinel": result is missing,
+                "exception_propagated": not conversion_failed,
+                "network_used": False,
+                "filesystem_read": False,
                 "arbitrary_code_executed": False,
             })
         if kind == "serialization-exclusion-update":
@@ -456,10 +492,45 @@ class RepositoryToolSuite:
                 "truth_table": [
                     {
                         "validate_by_alias": enabled,
-                        "selected_key": "validation_alias" if enabled else "field_name",
+                        "is_false_selected_key": (
+                            "field_name" if enabled is False else "validation_alias"
+                        ),
+                        "falsy_selected_key": (
+                            "field_name" if not enabled else "validation_alias"
+                        ),
+                        "conditions_diverge": (enabled is False) != (not enabled),
                     }
-                    for enabled in (False, True)
+                    for enabled in (None, False, True)
                 ],
+                "requires_resolution": True,
+                "resolution_question": (
+                    "The proposed `is False` condition diverges from a falsy check when the "
+                    "configuration value is None. Show repository evidence that None is "
+                    "unreachable here, or report the changed condition as a finding."
+                ),
+                "network_used": False,
+                "filesystem_read": False,
+                "arbitrary_code_executed": False,
+            })
+        if kind == "module-getattr-alias-bypass":
+            module_globals = {"legacy_name": "existing-function"}
+            requested = "legacy_name"
+            fallback_invoked = requested not in module_globals
+            return _evidence("semantic_probe", {
+                "kind": kind,
+                "operation": "resolve-existing-module-global-before-module-getattr",
+                "requested_name": requested,
+                "name_exists_in_module_globals": requested in module_globals,
+                "module_getattr_invoked": fallback_invoked,
+                "deprecation_warning_path_reached": fallback_invoked,
+                "requires_resolution": True,
+                "resolution_question": (
+                    "Python resolves an existing module global without calling module __getattr__. "
+                    "Show that each deprecated public name is absent from that module, or report "
+                    "the warning bypass as a finding."
+                ),
+                "network_used": False,
+                "filesystem_read": False,
                 "arbitrary_code_executed": False,
             })
         raise ValueError(
@@ -628,11 +699,14 @@ class RepositoryToolSuite:
                                 "git-option-normalization",
                                 "url-normalization-redaction",
                                 "tri-state-boolean",
+                                "nullable-length",
+                                "sentinel-error-propagation",
                                 "serialization-exclusion-update",
                                 "equality-negation-contract",
                                 "decorator-order",
                                 "self-cycle-collection",
                                 "alias-configuration-direction",
+                                "module-getattr-alias-bypass",
                             ],
                         }
                     },

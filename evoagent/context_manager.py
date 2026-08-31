@@ -84,6 +84,15 @@ class DiffHunk:
     def deleted(self) -> int:
         return sum(line.startswith("-") and not line.startswith("---") for line in self.lines)
 
+    @property
+    def new_end(self) -> int:
+        """Return the inclusive new-file line covered by this hunk."""
+        visible = sum(
+            not line.startswith("-") or line.startswith("---")
+            for line in self.lines
+        )
+        return self.new_start + max(0, visible - 1)
+
 
 class ContextManager:
     """Build bounded semantic views while retaining auditable compression facts."""
@@ -171,13 +180,19 @@ class ContextManager:
     def compress_diff(
         self, diff: str, context_key: str = "", label: str = "review",
         focus_files: Sequence[str] = (), risk_domains: Sequence[str] = (),
+        focus_locations: Sequence[Tuple[str, int]] = (),
         max_tokens: Optional[int] = None,
     ) -> Dict[str, Any]:
         budget = max(256, min(int(max_tokens or self.diff_token_budget), self.input_token_budget))
         hunks = self._parse_hunks(diff)
         focus = {str(path).replace("\\", "/").lower() for path in focus_files if path}
         domains = {str(value).lower() for value in risk_domains if value}
-        mapped = [self._map_hunk(hunk, focus, domains) for hunk in hunks]
+        locations: Dict[str, set] = {}
+        for path, line in focus_locations:
+            normalized = str(path).replace("\\", "/").lower()
+            if normalized and int(line) > 0:
+                locations.setdefault(normalized, set()).add(int(line))
+        mapped = [self._map_hunk(hunk, focus, domains, locations) for hunk in hunks]
         chunks = self._chunk_maps(mapped)
         reduced = self._reduce_maps(chunks)
         original_tokens = estimate_tokens(diff)
@@ -188,7 +203,15 @@ class ContextManager:
             "source_sha256": hashlib.sha256(diff.encode("utf-8")).hexdigest(),
             "original_estimated_tokens": original_tokens,
             "token_budget": budget,
-            "focus": {"files": sorted(focus), "risk_domains": sorted(domains)},
+            "focus": {
+                "files": sorted(focus),
+                "risk_domains": sorted(domains),
+                "locations": [
+                    {"path": path, "line": line}
+                    for path in sorted(locations)
+                    for line in sorted(locations[path])
+                ],
+            },
             "selected_hunks": [],
             "omitted_hunk_summaries": [],
             "aggregate": self._aggregate_maps(mapped),
@@ -330,6 +353,12 @@ class ContextManager:
             if estimate_tokens(managed) <= hard_input_limit:
                 break
             managed.pop(optional_key, None)
+        if estimate_tokens(managed) > hard_input_limit:
+            overflow = estimate_tokens(managed) - hard_input_limit
+            task_tokens = estimate_tokens(managed.get("task", ""))
+            managed["task"] = self._compact_task(
+                managed.get("task", ""), max(80, task_tokens - overflow - 16),
+            )
         stats = {
             "estimated_input_tokens_before": original_tokens,
             "estimated_input_tokens_after": estimate_tokens(managed),
@@ -445,7 +474,10 @@ class ContextManager:
             hunks.append(DiffHunk(0, path or "unknown", "@@ unparsed diff @@", tuple(diff.splitlines()), 0, 0))
         return hunks
 
-    def _map_hunk(self, hunk: DiffHunk, focus: set, domains: set) -> Dict[str, Any]:
+    def _map_hunk(
+        self, hunk: DiffHunk, focus: set, domains: set,
+        locations: Optional[Dict[str, set]] = None,
+    ) -> Dict[str, Any]:
         lowered = hunk.content.lower()
         signals = []
         score = min(12, hunk.added * 2 + hunk.deleted)
@@ -455,6 +487,11 @@ class ContextManager:
             for value in focus
         ):
             score += 40
+        target_lines = (locations or {}).get(normalized_path, set())
+        if any(hunk.new_start <= line <= hunk.new_end for line in target_lines):
+            # Candidate verification must retain the exact changed hunk even
+            # when every candidate belongs to the same large source file.
+            score += 120
         for name, weight, needles in RISK_SIGNALS:
             hits = sum(lowered.count(needle) for needle in needles)
             if hits:

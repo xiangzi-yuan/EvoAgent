@@ -90,6 +90,30 @@ class ContextManagerTests(unittest.TestCase):
         self.assertLess(compressed["compressed_estimated_tokens"], compressed["original_estimated_tokens"])
         self.assertLessEqual(estimate_tokens(compressed), 1000)
 
+    def test_exact_candidate_location_outranks_unrelated_risky_hunk(self):
+        diff = (
+            "--- a/src/model.py\n+++ b/src/model.py\n"
+            "@@ -1,2 +1,3 @@\n context = True\n+result = eval(user_input)\n"
+            " return context\n"
+            "@@ -199,2 +200,3 @@\n value = current\n+return value != other\n"
+            " return value\n"
+        )
+        manager = ContextManager(
+            context_window_tokens=2048, input_token_budget=800,
+            diff_token_budget=340, map_chunk_tokens=160,
+        )
+
+        compressed = manager.compress_diff(
+            diff, "task", "critic", focus_files=["src/model.py"],
+            focus_locations=[("src/model.py", 201)],
+        )
+
+        self.assertIn("@@ -199,2 +200,3 @@", compressed["selected_hunks"][0]["header"])
+        self.assertEqual(
+            [{"path": "src/model.py", "line": 201}],
+            compressed["focus"]["locations"],
+        )
+
     def test_old_observations_are_summarized_and_evidence_is_retained(self):
         manager = ContextManager(
             observation_token_budget=350, recent_observations=1,

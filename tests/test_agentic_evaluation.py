@@ -273,6 +273,9 @@ class AgenticEvaluationTests(unittest.TestCase):
         alias = RepositoryToolSuite.semantic_probe(
             "alias-configuration-direction"
         )["output"]
+        module_getattr = RepositoryToolSuite.semantic_probe(
+            "module-getattr-alias-bypass"
+        )["output"]
         path = RepositoryToolSuite.semantic_probe("path-containment")["output"]
         security_default = RepositoryToolSuite.semantic_probe(
             "security-control-default"
@@ -283,15 +286,23 @@ class AgenticEvaluationTests(unittest.TestCase):
         git_option = RepositoryToolSuite.semantic_probe(
             "git-option-normalization"
         )["output"]
+        nullable_length = RepositoryToolSuite.semantic_probe(
+            "nullable-length"
+        )["output"]
+        sentinel = RepositoryToolSuite.semantic_probe(
+            "sentinel-error-propagation"
+        )["output"]
 
         self.assertTrue(serialization["excluded_field_update_lost"])
         self.assertTrue(equality["contract_violated"])
         self.assertFalse(decorators["same_result"])
         self.assertTrue(cycle["collection_delayed_until_cyclic_gc"])
         self.assertEqual(
-            ["field_name", "validation_alias"],
-            [item["selected_key"] for item in alias["truth_table"]],
+            [True, False, False],
+            [item["conditions_diverge"] for item in alias["truth_table"]],
         )
+        self.assertFalse(module_getattr["module_getattr_invoked"])
+        self.assertFalse(module_getattr["deprecation_warning_path_reached"])
         self.assertTrue(path["parent_segments_escape_base"])
         self.assertFalse(path["filesystem_read"])
         self.assertTrue(security_default["security_control_disabled_by_default"])
@@ -306,13 +317,53 @@ class AgenticEvaluationTests(unittest.TestCase):
         self.assertFalse(git_option["raw_check_blocks"])
         self.assertTrue(git_option["canonical_check_blocks"])
         self.assertTrue(git_option["dangerous_flag_emitted_after_raw_check"])
+        self.assertTrue(nullable_length["raises_when_value_is_none"])
+        self.assertTrue(sentinel["conversion_failed"])
+        self.assertTrue(sentinel["returned_missing_sentinel"])
         self.assertTrue(all(
             item["arbitrary_code_executed"] is False
             for item in (
                 serialization, equality, decorators, cycle, alias, path,
                 security_default, workflow_expression, git_option,
+                nullable_length, sentinel, module_getattr,
             )
         ))
+
+    def test_repository_preflight_reads_distinct_regions_and_probes_nullable_len(self):
+        class RecordingTools:
+            def __init__(self):
+                self.calls = []
+
+            def names(self):
+                return ["read_file", "semantic_probe"]
+
+            def invoke(self, name, arguments):
+                self.calls.append((name, dict(arguments)))
+                if name == "semantic_probe":
+                    return RepositoryToolSuite.semantic_probe(arguments["kind"])
+                return {
+                    "evidence_id": "read:%d" % len(self.calls),
+                    "tool": name, "output": dict(arguments),
+                }
+
+        parsed = parse_unified_diff(
+            "--- a/src/app.py\n+++ b/src/app.py\n"
+            "@@ -9 +10 @@\n+normalized = value.strip()\n"
+            "@@ -99 +100 @@\n+width = len(rule.subdomain)\n"
+        )
+        tools = RecordingTools()
+
+        observations = ModeRouterReviewer._repository_preflight(
+            {"files": parsed.files}, parsed, tools,
+        )
+
+        reads = [arguments for name, arguments in tools.calls if name == "read_file"]
+        self.assertEqual(2, len(reads))
+        self.assertEqual({10, 100}, {item["end_line"] - 25 for item in reads})
+        self.assertIn(
+            ("semantic_probe", {"kind": "nullable-length"}), tools.calls,
+        )
+        self.assertTrue(all(item["ok"] for item in observations))
 
     def test_git_option_preflight_runs_fixed_normalization_probe(self):
         class RecordingTools:
@@ -356,6 +407,21 @@ class AgenticEvaluationTests(unittest.TestCase):
             "cwe": "CWE-532", "acceptable_cwes": ["CWE-200", "CWE-522"],
             "path": "app.py", "start_line": 5, "end_line": 5,
             "severity": "high",
+        }]
+
+        self.assertEqual(1, len(one_to_one_match(expected, [finding])))
+
+    def test_decorator_order_rule_maps_to_improper_behavior_order(self):
+        finding = Finding(
+            rule_id="DECORATOR-ORDER", severity=Severity.HIGH,
+            title="Decorator order reversed", explanation="Order changes behavior.",
+            path="mypyc/irbuild/function.py", line=506,
+            evidence="decorated_func = classmethod(decorated_func)",
+            fix="Preserve source order.", test="Cover both decorator orders.",
+        )
+        expected = [{
+            "cwe": "CWE-696", "path": "mypyc/irbuild/function.py",
+            "start_line": 506, "end_line": 520, "severity": "medium",
         }]
 
         self.assertEqual(1, len(one_to_one_match(expected, [finding])))
@@ -427,6 +493,54 @@ class AgenticEvaluationTests(unittest.TestCase):
         self.assertEqual("protocol-requirement", result["_observations"][0]["tool"])
         self.assertTrue(result["_observations"][1]["ok"])
 
+    def test_worker_must_resolve_fixed_counterexample_before_finishing(self):
+        class SequencedClient:
+            def __init__(self):
+                self.actions = [
+                    {"action": "final", "findings": []},
+                    {
+                        "action": "final", "findings": [],
+                        "evidence_resolutions": [{
+                            "evidence_id": "semantic_probe:test",
+                            "status": "refuted",
+                            "explanation": "Repository type evidence proves None is unreachable.",
+                            "supporting_evidence_ids": ["read_file:test"],
+                        }],
+                    },
+                ]
+
+            def complete_json(self, *_args, **_kwargs):
+                return self.actions.pop(0)
+
+        initial = [{
+            "step": 0, "tool": "semantic_probe", "ok": True,
+            "result": {
+                "evidence_id": "semantic_probe:test", "tool": "semantic_probe",
+                "output": {
+                    "requires_resolution": True,
+                    "resolution_question": "Explain the divergent branch.",
+                },
+            },
+        }, {
+            "step": 0, "tool": "read_file", "ok": True,
+            "result": {
+                "evidence_id": "read_file:test", "tool": "read_file",
+                "output": {"path": "app.py", "content": "value is bool"},
+            },
+        }]
+
+        result = BoundedRole(
+            "correctness-reliability", "Review.", SequencedClient(),
+            token_budget=4000, time_budget=30,
+        ).run(
+            "{}", ToolRegistry([]), ExecutionLedger("agentic"),
+            initial_observations=initial,
+        )
+
+        self.assertEqual(2, result["_steps"])
+        self.assertEqual("protocol-requirement", result["_observations"][-1]["tool"])
+        self.assertIn("semantic_probe:test", result["_observations"][-1]["error"])
+
     def test_suggestion_metrics_measure_recovery_without_publishing_the_claim(self):
         suggestion = Finding(
             rule_id="CWE-502", severity=Severity.HIGH,
@@ -474,6 +588,41 @@ class AgenticEvaluationTests(unittest.TestCase):
         self.assertEqual(1.0, metrics["missed_finding_recovery_rate"])
         self.assertEqual(1.0, metrics["combined_recall_after_verification"])
         self.assertEqual(1.0, metrics["suggestion_utility_rate"])
+
+    def test_worker_failure_is_reported_as_degraded_execution(self):
+        class DegradedReviewer:
+            name = "degraded"
+
+            def review_case(self, _case, _parsed):
+                return []
+
+            def evaluation_execution(self):
+                return {}
+
+            def evaluation_summary(self):
+                return {
+                    "worker_results": [{
+                        "worker": "correctness-reliability",
+                        "status": "failed",
+                        "error": "budget exhausted",
+                    }],
+                }
+
+        case = {
+            "id": "degraded", "repository": "repo", "pull_request": 1,
+            "split": "validation", "source": {"kind": "synthetic-controlled"},
+            "diff": "--- a/app.py\n+++ b/app.py\n@@ -0,0 +1 @@\n+value = 1\n",
+            "expected_findings": [],
+        }
+
+        report = ProductionEvaluationHarness().run(
+            DegradedReviewer(), [case], "degraded",
+        )
+
+        self.assertTrue(report["case_results"][0]["execution_success"])
+        self.assertTrue(report["case_results"][0]["degraded_execution"])
+        self.assertEqual(1, report["case_results"][0]["worker_failures"])
+        self.assertEqual(0.0, report["metrics"]["full_role_success_rate"])
 
     def test_targeted_review_labels_do_not_call_unmatched_findings_invalid(self):
         finding = Finding(
@@ -695,10 +844,16 @@ class AgenticEvaluationTests(unittest.TestCase):
             findings = reviewer.review(DIFF, parsed)
             self.assertEqual(["SEC-PATH-TRAVERSAL"], [item.rule_id for item in findings])
             actual = {}
-            for item in reviewer.evaluation_execution()["model_call_log"]:
+            execution = reviewer.evaluation_execution()
+            for item in execution["model_call_log"]:
                 actual[item["role"]] = actual.get(item["role"], 0) + 1
             self.assertEqual(calls, actual)
             self.assertEqual(14, reviewer.evaluation_config()["deterministic_rules"])
+            if arm == "full-agentic":
+                self.assertTrue(any(
+                    item["role"] == "critic" and item["tool"] == "changed_line"
+                    for item in execution["tool_call_log"]
+                ))
 
     def test_weak_hash_rule_ignores_fixed_fixture_but_keeps_dynamic_input(self):
         diff = (

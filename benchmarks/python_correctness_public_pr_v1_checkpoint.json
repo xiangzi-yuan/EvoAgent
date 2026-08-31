@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "status": "development-checkpoint-not-a-uniform-release-benchmark",
+  "model": "deepseek-v4-flash",
+  "provider": "deepseek",
+  "case_results": [
+    {
+      "id": "pallets-flask-pr-5044-a53835a3",
+      "outcome": "missed",
+      "diagnosis": "The changed line and len(None) counterexample were available, but the external Werkzeug Rule.subdomain nullability contract was not available in the Flask checkout.",
+      "report": "output/python-correctness/flask-5044-after.json"
+    },
+    {
+      "id": "pallets-werkzeug-pr-2888-15b92ecd",
+      "outcome": "target-candidate-rejected",
+      "diagnosis": "Workers found the conversion-error behavior; Critic treated tests and documentation added by the same PR as independent counter-evidence.",
+      "report": "output/python-correctness/werkzeug-2888-after2.json"
+    },
+    {
+      "id": "textualize-rich-pr-2922-66226402",
+      "outcome": "execution-failed",
+      "diagnosis": "The model returned malformed JSON; this is recorded as an execution failure, not a semantic miss.",
+      "report": "output/python-correctness/rich-2922-after.json"
+    },
+    {
+      "id": "pallets-click-pr-3695-7a0a3447",
+      "outcome": "missed-with-worker-failure",
+      "diagnosis": "One worker exhausted its budget; the other refuted only the utility-module aliases and did not resolve the direct get_binary_stream import path named by the review label.",
+      "report": "output/python-correctness/click-3695-audited.json"
+    },
+    {
+      "id": "pydantic-pr-13717-f2cb3992",
+      "outcome": "recovered-as-suggestion",
+      "diagnosis": "The evidence-resolution protocol forced a candidate with repository type evidence. Lead accepted it, while Critic kept it out of automatic publication pending stronger reachability evidence.",
+      "strict_formal_recall": 0.0,
+      "combined_recall_after_human_verification": 1.0,
+      "report": "output/python-correctness/pydantic-13717-enforced-rescored.json"
+    },
+    {
+      "id": "python-mypy-pr-21811-062f4a68",
+      "outcome": "formal-hit",
+      "diagnosis": "Reviewer, Critic, Lead and evidence gate agreed on the decorator-order defect. The predicted severity was high while the label was medium.",
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "latency_ms": 189080,
+      "total_tokens": 142825,
+      "report": "output/python-correctness/mypy-21811-rescored.json"
+    }
+  ],
+  "interpretation": [
+    "This checkpoint combines diagnostic runs made while the implementation was changing and must not be presented as a uniform six-case benchmark.",
+    "It proves one formal ordinary-logic hit and one suggestion-level recovery, while exposing remaining cross-dependency, critic-evidence, output-format, and latency gaps.",
+    "Run all six cases again from one commit before making an aggregate precision or recall claim."
+  ]
+}

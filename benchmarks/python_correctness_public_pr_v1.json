@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "name": "python-correctness-public-pr-v1",
+  "purpose": "Low-risk public PR diagnostic set for ordinary Python correctness and compatibility review.",
+  "safety_policy": {
+    "include": [
+      "nullability and dependency contracts",
+      "exception and sentinel behavior",
+      "Python comparison and decorator protocols",
+      "deprecation compatibility",
+      "tri-state configuration logic"
+    ],
+    "exclude": [
+      "security-fix reversals",
+      "vulnerability exploitation",
+      "reverse engineering",
+      "credential or secret handling cases",
+      "malware or offensive tooling"
+    ],
+    "repository_execution": "read-only checkout inspection; repository tests and repository code were not executed"
+  },
+  "source_labels": "benchmarks/real_pr_review_labels.jsonl",
+  "generated_dataset": "output/real-pr-reviewed-10-targeted-v4.jsonl",
+  "cases": [
+    {
+      "id": "pallets-flask-pr-5044-a53835a3",
+      "category": "optional dependency attribute used with len",
+      "public_url": "https://github.com/pallets/flask/pull/5044"
+    },
+    {
+      "id": "pallets-werkzeug-pr-2888-15b92ecd",
+      "category": "conversion error and missing-default behavior",
+      "public_url": "https://github.com/pallets/werkzeug/pull/2888"
+    },
+    {
+      "id": "textualize-rich-pr-2922-66226402",
+      "category": "Python equality and inequality contract",
+      "public_url": "https://github.com/Textualize/rich/pull/2922"
+    },
+    {
+      "id": "pallets-click-pr-3695-7a0a3447",
+      "category": "module getattr deprecation compatibility",
+      "public_url": "https://github.com/pallets/click/pull/3695"
+    },
+    {
+      "id": "pydantic-pr-13717-f2cb3992",
+      "category": "tri-state alias configuration",
+      "public_url": "https://github.com/pydantic/pydantic/pull/13717"
+    },
+    {
+      "id": "python-mypy-pr-21811-062f4a68",
+      "category": "decorator application order",
+      "public_url": "https://github.com/python/mypy/pull/21811"
+    }
+  ]
+}
