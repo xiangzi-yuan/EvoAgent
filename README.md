@@ -219,7 +219,9 @@ python scripts/run_single_agentic_case.py benchmarks/obvious_severe_smoke.jsonl 
 
 同一实现版本的 DeepSeek V4 Flash 四角色结果为：执行成功率 100%，5/5 主缺陷命中，高风险 Recall 100%，证据与精确行准确率均为 100%，4/4 安全修复无正式误报；原始 Precision 83.33%、Recall 100%、F1 90.91%。5 条非发布建议经人工裁决为 1 条 required、1 条 optional、3 条 invalid，所以严格干净静默率只有 50%，建议噪声仍需继续治理。14 条规则在同集合仅命中 1/5 风险，高风险 Recall 20%，说明这批新增案例主要验证调用链和安全语义，而不是规则记忆。机器可读基线见 `benchmarks/obvious_severe_smoke_v2_baseline.json`，最终报告见 `output/obvious-severe/agentic-deepseek-v4-flash-v2-final.json`。
 
-为这批对照增加的能力仍是通用机制：`github-actions-expression-shell` 固定探针只比较表达式直接拼入命令与环境变量间接传递，不执行命令；预检会从高风险新增行追踪一个跨文件使用点和一跳调用者。Critic 和证据门禁没有放宽，Giskard Finding 必须拿到 `_inline_env.from_string(self.content_template)` 等仓库调用链证据后才能正式发布。
+面试演示的稳定模式在提交 `df2111a` 增加了第 15 条、跨行且高信号的确定性底线：只有同一文件删除 `SandboxedEnvironment` 并新增普通 `Environment(...)` 构造时才报告 `SEC-JINJA-UNSANDBOXED`；反向安全修复不会命中。该模式同时将 Agent 重审轮次固定为 0，保留 Lead、Security、Correctness/Reliability，以及存在候选时的 Critic 首轮协作，但不允许 Lead 反复扩大调用量。官方 DeepSeek V4 Flash 的一条风险回放与一条干净修复 Canary 均通过：TP=1、FP=0、FN=0，风险精确命中第 37 行，干净方向 Finding/建议均为 0；风险方向从旧实验的 12 次调用、103128 tokens 降为 6 次调用、44173 tokens。机器可读结果见 `benchmarks/obvious_stability_canary_v1_baseline.json`。这只是一个缺陷家族的稳定门禁，不代表所有明显缺陷或隐藏逻辑错误都已解决。
+
+为这批对照增加的能力仍是通用机制：`github-actions-expression-shell` 固定探针只比较表达式直接拼入命令与环境变量间接传递，不执行命令；预检会从高风险新增行追踪一个跨文件使用点和一跳调用者。Critic 和证据门禁没有放宽：Agent 自主提出的 Giskard Finding 仍需 `_inline_env.from_string(self.content_template)` 等仓库调用链证据；第 15 条确定性底线则只接受同一 Diff 中明确的“删除沙箱、构造普通环境”配对证据。
 
 ### Python 安全漏洞配对集
 

@@ -1,0 +1,101 @@
+{
+  "schema_version": 1,
+  "name": "obvious-stability-canary-v1",
+  "status": "passed",
+  "reviewed_commit": "df2111ac162c41c4aba07e08e943dacebe04a27c",
+  "reviewed_at": "2026-08-31",
+  "model": {
+    "provider": "deepseek",
+    "name": "deepseek-v4-flash",
+    "base_url": "https://api.deepseek.com"
+  },
+  "configuration": {
+    "roles": [
+      "lead",
+      "security",
+      "correctness-reliability",
+      "critic"
+    ],
+    "deterministic_rules": 15,
+    "max_revision_rounds": 0,
+    "token_budget_per_pr": 16000,
+    "time_budget_seconds_per_pr": 180,
+    "model_request_timeout_seconds": 90,
+    "repository_context": true,
+    "repository_execution": false,
+    "network_or_exploit_execution": false
+  },
+  "scope": {
+    "dataset": "benchmarks/obvious_severe_smoke_v2.jsonl",
+    "case_family": "Giskard Jinja sandbox downgrade",
+    "evaluation_records": 2,
+    "risk_directions": 1,
+    "clean_fix_directions": 1
+  },
+  "metrics": {
+    "execution_success_rate": 1.0,
+    "tp": 1,
+    "fp": 0,
+    "fn": 0,
+    "precision": 1.0,
+    "recall": 1.0,
+    "f1": 1.0,
+    "high_risk_recall": 1.0,
+    "clean_accuracy": 1.0,
+    "strict_clean_silence_rate": 1.0,
+    "evidence_accuracy": 1.0,
+    "exact_line_accuracy": 1.0,
+    "severity_accuracy": 1.0,
+    "formal_suggestions": 0,
+    "worker_failures": 0
+  },
+  "efficiency": {
+    "llm_calls": 11,
+    "input_tokens": 58268,
+    "output_tokens": 3796,
+    "total_tokens": 62064,
+    "latency_ms": 40003,
+    "risk_case_calls": 6,
+    "risk_case_tokens": 44173,
+    "clean_case_calls": 5,
+    "clean_case_tokens": 17891,
+    "previous_risk_case_calls": 12,
+    "previous_risk_case_tokens": 103128
+  },
+  "cases": [
+    {
+      "id": "giskard-agents-cve-2026-34172-regression",
+      "kind": "public-security-fix-reversal",
+      "result": "required-hit",
+      "rule_id": "SEC-JINJA-UNSANDBOXED",
+      "cwe": "CWE-1336",
+      "path": "libs/giskard-agents/src/giskard/agents/templates/environment.py",
+      "line": 37,
+      "severity": "high",
+      "predicted": 1,
+      "suggestions": 0,
+      "llm_calls": 6,
+      "total_tokens": 44173,
+      "latency_ms": 22046,
+      "report": "output/stability-canary-v1/giskard-regression.json",
+      "report_sha256": "59543f0aa09235fa7bd37610f48ae5378ff56ef6da951b41d1f9c50179586aab"
+    },
+    {
+      "id": "giskard-agents-cve-2026-34172-security-fix",
+      "kind": "public-security-fix-slice",
+      "result": "silent",
+      "predicted": 0,
+      "suggestions": 0,
+      "llm_calls": 5,
+      "total_tokens": 17891,
+      "latency_ms": 17957,
+      "report": "output/stability-canary-v1/giskard-security-fix.json",
+      "report_sha256": "24949cfbaff0c43eee6b60db2eea76b76de837ee4821daa49042f171fede333b"
+    }
+  ],
+  "interpretation": [
+    "The obvious sandbox-removal regression is now protected by a narrow deterministic cross-line guard; agents still provide contextual review around that baseline.",
+    "Evaluation uses one worker pass per specialist, so a Lead revision request cannot multiply calls in the stability profile.",
+    "This two-case canary proves one defect family and its clean inverse only; it is not a production accuracy estimate or proof that all obvious defects are detected."
+  ]
+}
