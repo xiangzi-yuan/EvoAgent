@@ -173,6 +173,10 @@ def _semantic_probe_supports_finding(item: dict, finding: Finding) -> bool:
         "security-control-default": (
             "cwe-287", "cwe-347", "signature", "verify_signature", "authentication",
         ),
+        "github-actions-expression-shell": (
+            "cwe-78", "cwe-94", "command injection", "shell", "github actions",
+            "expression interpolation",
+        ),
         "url-normalization-redaction": (
             "url", "redact", "credential", "cwe-200", "cwe-522", "cwe-532",
         ),

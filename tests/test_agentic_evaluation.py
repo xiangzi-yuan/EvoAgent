@@ -171,6 +171,96 @@ class AgenticEvaluationTests(unittest.TestCase):
         )
         self.assertTrue(observations[0]["ok"])
 
+    def test_workflow_expression_preflight_compares_safe_env_indirection(self):
+        class RecordingTools:
+            def __init__(self):
+                self.calls = []
+
+            def names(self):
+                return ["semantic_probe"]
+
+            def invoke(self, name, arguments):
+                self.calls.append((name, dict(arguments)))
+                return RepositoryToolSuite.semantic_probe(arguments["kind"])
+
+        parsed = parse_unified_diff(
+            "--- a/.github/workflows/review.yml\n"
+            "+++ b/.github/workflows/review.yml\n"
+            "@@ -10 +10 @@\n"
+            "-    --target \"$TARGET\"\n"
+            "+    --target \"${{ steps.changed.outputs.target }}\"\n"
+        )
+        tools = RecordingTools()
+
+        observations = ModeRouterReviewer._repository_preflight(
+            {"files": parsed.files}, parsed, tools, repository_available=False,
+        )
+
+        self.assertEqual(
+            [("semantic_probe", {"kind": "github-actions-expression-shell"})],
+            tools.calls,
+        )
+        self.assertTrue(observations[0]["ok"])
+
+    def test_repository_preflight_traces_template_environment_usage(self):
+        class RecordingTools:
+            def __init__(self):
+                self.calls = []
+
+            def names(self):
+                return ["read_file", "search_repository", "ast_analyze"]
+
+            def invoke(self, name, arguments):
+                self.calls.append((name, dict(arguments)))
+                if name == "search_repository" and arguments["query"] == "_inline_env":
+                    return {
+                        "evidence_id": "search:inline", "tool": name,
+                        "output": [{
+                            "path": "templates/message.py", "line": 17,
+                            "content": "template = _inline_env.from_string(self.content_template)",
+                        }],
+                    }
+                if name == "read_file" and arguments["path"] == "templates/message.py":
+                    return {
+                        "evidence_id": "read:message", "tool": name,
+                        "output": {
+                            "path": "templates/message.py", "start_line": 1,
+                            "end_line": 47,
+                            "content": "class MessageTemplate:\n    def render(self):\n        return _inline_env.from_string(self.content_template)\n",
+                        },
+                    }
+                return {
+                    "evidence_id": "%s:%d" % (name, len(self.calls)),
+                    "tool": name, "output": dict(arguments),
+                }
+
+        parsed = parse_unified_diff(
+            "--- a/templates/environment.py\n"
+            "+++ b/templates/environment.py\n"
+            "@@ -2,2 +2,2 @@\n"
+            "-from jinja2.sandbox import SandboxedEnvironment\n"
+            "+from jinja2 import Environment\n"
+            "@@ -37 +37 @@\n"
+            "-_inline_env = SandboxedEnvironment()\n"
+            "+_inline_env = Environment()\n"
+        )
+        tools = RecordingTools()
+
+        ModeRouterReviewer._repository_preflight(
+            {"files": parsed.files}, parsed, tools, repository_available=True,
+        )
+
+        queries = [
+            arguments["query"] for name, arguments in tools.calls
+            if name == "search_repository"
+        ]
+        self.assertIn("_inline_env", queries)
+        self.assertIn("MessageTemplate", queries)
+        self.assertTrue(any(
+            name == "read_file" and arguments["path"] == "templates/message.py"
+            for name, arguments in tools.calls
+        ))
+
     def test_fixed_semantic_probes_cover_common_cross_line_contracts(self):
         serialization = RepositoryToolSuite.semantic_probe(
             "serialization-exclusion-update"
@@ -187,6 +277,9 @@ class AgenticEvaluationTests(unittest.TestCase):
         security_default = RepositoryToolSuite.semantic_probe(
             "security-control-default"
         )["output"]
+        workflow_expression = RepositoryToolSuite.semantic_probe(
+            "github-actions-expression-shell"
+        )["output"]
 
         self.assertTrue(serialization["excluded_field_update_lost"])
         self.assertTrue(equality["contract_violated"])
@@ -200,11 +293,18 @@ class AgenticEvaluationTests(unittest.TestCase):
         self.assertFalse(path["filesystem_read"])
         self.assertTrue(security_default["security_control_disabled_by_default"])
         self.assertFalse(security_default["verification_branch_entered"])
+        self.assertTrue(workflow_expression["direct_command_contains_attacker_text"])
+        self.assertTrue(workflow_expression["shell_metacharacters_reach_direct_command"])
+        self.assertTrue(
+            workflow_expression[
+                "environment_reference_keeps_value_out_of_command_text"
+            ]
+        )
         self.assertTrue(all(
             item["arbitrary_code_executed"] is False
             for item in (
                 serialization, equality, decorators, cycle, alias, path,
-                security_default,
+                security_default, workflow_expression,
             )
         ))
 

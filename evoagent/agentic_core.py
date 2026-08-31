@@ -1077,12 +1077,15 @@ class ModeRouterReviewer(Reviewer):
             "hasattr", "len(", "model_dump", "none", "pop(", "replace(",
             "secret", "token", "validation_alias", "warn(", "warning",
             "weakref", "_gc_cycle", "redirect", "normalize", "decode",
+            "environment(", "sandboxedenvironment", "_inline_env",
         }
 
         def priority(item):
             path = item.path.replace("\\", "/").lower()
             content = item.content.lower()
             score = 20 if path.endswith(".py") else 0
+            if content.lstrip().startswith(("import ", "from ")):
+                score -= 20
             if not any(part in path for part in ("/test", "tests/", ".github/", "docs/")):
                 score += 15
             score += 8 * sum(cue in content for cue in risk_cues)
@@ -1114,6 +1117,7 @@ class ModeRouterReviewer(Reviewer):
                     "error": str(exc)[:1000],
                 })
         queries = []
+        cross_file_hit = None
         if selected:
             nearby = [
                 item.content for item in added
@@ -1144,11 +1148,59 @@ class ModeRouterReviewer(Reviewer):
                         "step": 0, "tool": "search_repository", "ok": True,
                         "result": value, "reason": "evidence-first semantic contract probe",
                     })
+                    payload = value.get("output") if isinstance(value, dict) else None
+                    if cross_file_hit is None and isinstance(payload, list):
+                        candidates = [
+                            item for item in payload
+                            if isinstance(item, dict)
+                            and item.get("path") != selected.path
+                            and not str(item.get("content", "")).lstrip().startswith(
+                                ("import ", "from ")
+                            )
+                        ]
+                        if candidates:
+                            cross_file_hit = candidates[0]
                 except Exception as exc:
                     observations.append({
                         "step": 0, "tool": "search_repository", "ok": False,
                         "error": str(exc)[:1000],
                     })
+        if (
+            repository_available and cross_file_hit
+            and "read_file" in tools.names()
+        ):
+            try:
+                cross_line = max(1, int(cross_file_hit.get("line", 1)))
+                value = tools.invoke("read_file", {
+                    "path": str(cross_file_hit["path"]),
+                    "start_line": max(1, cross_line - 20),
+                    "end_line": cross_line + 30,
+                })
+                observations.append({
+                    "step": 0, "tool": "read_file", "ok": True,
+                    "result": value,
+                    "reason": "evidence-first cross-file use-site context",
+                })
+                payload = value.get("output") if isinstance(value, dict) else None
+                content = str(payload.get("content", "")) if isinstance(payload, dict) else ""
+                declarations = re.findall(
+                    r"^\s*(?:class|def|async\s+def)\s+([A-Za-z_][A-Za-z0-9_]*)",
+                    content, flags=re.MULTILINE,
+                )
+                if declarations and "search_repository" in tools.names():
+                    value = tools.invoke("search_repository", {
+                        "query": declarations[0], "limit": 10,
+                    })
+                    observations.append({
+                        "step": 0, "tool": "search_repository", "ok": True,
+                        "result": value,
+                        "reason": "evidence-first one-hop caller search",
+                    })
+            except Exception as exc:
+                observations.append({
+                    "step": 0, "tool": "read_file", "ok": False,
+                    "error": str(exc)[:1000],
+                })
         probe_kinds = []
         lowered = text.lower()
         if any(token in lowered for token in ("filepath.join", "os.path.join")) and any(
@@ -1157,6 +1209,12 @@ class ModeRouterReviewer(Reviewer):
             probe_kinds.append("path-containment")
         if "verify_signature" in lowered and "false" in lowered:
             probe_kinds.append("security-control-default")
+        selected_path = selected.path.replace("\\", "/").lower() if selected else ""
+        if (
+            selected_path.startswith(".github/workflows/")
+            and "${{" in lowered
+        ):
+            probe_kinds.append("github-actions-expression-shell")
         if "replace(" in lowered and any(
             token in lowered for token in ("url", "location", "redirect")
         ):

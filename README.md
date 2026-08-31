@@ -209,6 +209,12 @@ python scripts/run_single_agentic_case.py benchmarks/obvious_severe_smoke.jsonl 
 
 `--seed-report` 可重复传入，把多个已经完成的单例无模型调用地合并成批量报告。
 
+第二版配对门禁 `benchmarks/obvious_severe_smoke_v2.jsonl` 扩展到 9 条：5 条严重风险和 4 条原始安全修复方向。Sherlock 对照验证 GitHub Actions 表达式直接进入 shell 的命令注入，Giskard 对照验证普通 Jinja `Environment` 替换沙箱后，仓库中的字符串模板调用链是否可被追踪；每组安全修复本身必须保持无正式 Finding。
+
+同一实现版本的 DeepSeek V4 Flash 四角色结果为：执行成功率 100%，5/5 主缺陷命中，高风险 Recall 100%，证据与精确行准确率均为 100%，4/4 安全修复无正式误报；原始 Precision 83.33%、Recall 100%、F1 90.91%。5 条非发布建议经人工裁决为 1 条 required、1 条 optional、3 条 invalid，所以严格干净静默率只有 50%，建议噪声仍需继续治理。14 条规则在同集合仅命中 1/5 风险，高风险 Recall 20%，说明这批新增案例主要验证调用链和安全语义，而不是规则记忆。机器可读基线见 `benchmarks/obvious_severe_smoke_v2_baseline.json`，最终报告见 `output/obvious-severe/agentic-deepseek-v4-flash-v2-final.json`。
+
+为这批对照增加的能力仍是通用机制：`github-actions-expression-shell` 固定探针只比较表达式直接拼入命令与环境变量间接传递，不执行命令；预检会从高风险新增行追踪一个跨文件使用点和一跳调用者。Critic 和证据门禁没有放宽，Giskard Finding 必须拿到 `_inline_env.from_string(self.content_template)` 等仓库调用链证据后才能正式发布。
+
 项目启动时会自动读取项目根目录的 `.env`，也兼容 `evoagent/.env`；系统环境变量优先于 `.env` 文件。推荐将以下内容写入根目录 `.env`（该文件已被 `.gitignore` 忽略）：
 
 ```env

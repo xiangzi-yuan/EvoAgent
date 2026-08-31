@@ -292,6 +292,30 @@ class RepositoryToolSuite:
                 "network_used": False,
                 "arbitrary_code_executed": False,
             })
+        if kind == "github-actions-expression-shell":
+            attacker_value = 'target"; echo INJECTED; #'
+            direct_command = (
+                'pytest --chunked-sites "' + attacker_value + '"'
+            )
+            environment_command = 'pytest --chunked-sites "$CHANGED_TARGETS"'
+            return _evidence("semantic_probe", {
+                "kind": kind,
+                "operation": "compare-expression-interpolation-with-environment-indirection",
+                "attacker_controlled_value": attacker_value,
+                "direct_expression_command": direct_command,
+                "environment_reference_command": environment_command,
+                "direct_command_contains_attacker_text": (
+                    attacker_value in direct_command
+                ),
+                "shell_metacharacters_reach_direct_command": all(
+                    token in direct_command for token in ('"', ';', '#')
+                ),
+                "environment_reference_keeps_value_out_of_command_text": (
+                    attacker_value not in environment_command
+                ),
+                "network_used": False,
+                "arbitrary_code_executed": False,
+            })
         if kind == "url-normalization-redaction":
             original = "http://user:s%7Eecret@example.invalid/objects.inv"
             unreserved = frozenset(
@@ -576,6 +600,7 @@ class RepositoryToolSuite:
                             "enum": [
                                 "path-containment",
                                 "security-control-default",
+                                "github-actions-expression-shell",
                                 "url-normalization-redaction",
                                 "tri-state-boolean",
                                 "serialization-exclusion-update",

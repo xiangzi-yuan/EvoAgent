@@ -1,0 +1,135 @@
+{
+  "schema_version": 1,
+  "name": "obvious-severe-smoke-v2",
+  "purpose": "Paired L0 diagnostic for obvious severe PR regressions and clean security-fix directions",
+  "dataset": {
+    "path": "benchmarks/obvious_severe_smoke_v2.jsonl",
+    "sha256": "c37312a5e317fa1594df2a7aec7a09374f922dc71713d0b4c1ce1ad3c9129f39",
+    "cases": 9,
+    "risk_cases": 5,
+    "clean_security_fix_cases": 4,
+    "real_bad_prs": 1,
+    "public_security_fix_reversals": 4,
+    "public_security_fix_slices": 4,
+    "production_readiness_claimed": false,
+    "limitations": [
+      "This small selected paired set is a diagnostic smoke gate, not an unbiased production estimate.",
+      "Security-fix reversals preserve documented vulnerable behavior but are never represented as the direction of the original fix.",
+      "Risk and clean counterfactuals intentionally share repositories, so this dataset does not satisfy repository-isolated train/validation/holdout evaluation.",
+      "Strict clean silence counts non-published suggestions even when manual adjudication later marks them invalid."
+    ]
+  },
+  "model": {
+    "provider": "deepseek",
+    "name": "deepseek-v4-flash"
+  },
+  "deterministic_14_rule": {
+    "report": "output/obvious-severe/deterministic-14-rule-v2.json",
+    "tp": 1,
+    "fp": 1,
+    "fn": 4,
+    "precision": 0.5,
+    "recall": 0.2,
+    "f1": 0.2857,
+    "high_risk_recall": 0.2,
+    "clean_accuracy": 1.0
+  },
+  "agentic_result": {
+    "report": "output/obvious-severe/agentic-deepseek-v4-flash-v2-final.json",
+    "report_sha256": "5f28fe310b2558a1c58fa47f1f4421170ccbc51b57e40fc7b4930a85af24543b",
+    "execution_success_rate": 1.0,
+    "required_tp": 5,
+    "raw_fp": 1,
+    "required_fn": 0,
+    "raw_precision": 0.8333,
+    "required_recall": 1.0,
+    "raw_f1": 0.9091,
+    "high_risk_recall": 1.0,
+    "evidence_accuracy": 1.0,
+    "exact_line_accuracy": 1.0,
+    "severity_accuracy": 0.6,
+    "clean_accuracy": 1.0,
+    "strict_clean_silence_rate": 0.5,
+    "formal_optional_findings": 1,
+    "formal_invalid_findings": 0,
+    "suggestions": 5,
+    "suggestion_adjudication_coverage": 1.0,
+    "suggestion_required": 1,
+    "suggestion_optional": 1,
+    "suggestion_invalid": 3,
+    "suggestion_utility_rate": 0.4,
+    "suggestion_nuisance_rate": 0.6,
+    "combined_required_recall_after_verification": 1.0,
+    "llm_calls": 93,
+    "total_tokens": 442024,
+    "average_latency_ms_per_pr": 35713.44
+  },
+  "adjudication": {
+    "suggestions": "benchmarks/adjudications/obvious-severe-v2-suggestions.confirmed.json",
+    "reviewer": "codex-manual-semantic-review",
+    "status": "confirmed"
+  },
+  "cases": [
+    {
+      "id": "microsoft-agent-governance-toolkit-pr-357",
+      "kind": "risk",
+      "primary_defect": "CWE-78 command injection through shell=True",
+      "expected_line": 19,
+      "result": "required-hit",
+      "additional_adjudication": "one required ignored-resource-limit suggestion and one optional exception-handling suggestion"
+    },
+    {
+      "id": "apache-airflow-cve-2026-59243-regression",
+      "kind": "risk",
+      "primary_defect": "CWE-347 JWT signature verification disabled by default",
+      "expected_line": 2427,
+      "result": "required-hit"
+    },
+    {
+      "id": "alibaba-open-code-review-issue-90-regression",
+      "kind": "risk",
+      "primary_defect": "CWE-22 repository path traversal and arbitrary file read",
+      "expected_line": 79,
+      "result": "required-hit",
+      "repository_context_used": true
+    },
+    {
+      "id": "sherlock-cve-2026-44590-regression",
+      "kind": "risk",
+      "primary_defect": "CWE-78 pull-request-controlled GitHub Actions command injection",
+      "expected_line": 97,
+      "result": "required-hit",
+      "repository_context_used": true
+    },
+    {
+      "id": "giskard-agents-cve-2026-34172-regression",
+      "kind": "risk",
+      "primary_defect": "CWE-1336 unsandboxed attacker-controlled Jinja template rendering",
+      "expected_line": 37,
+      "result": "required-hit",
+      "repository_context_used": true
+    },
+    {
+      "id": "apache-airflow-cve-2026-59243-security-fix",
+      "kind": "clean-security-fix",
+      "result": "no-formal-finding",
+      "invalid_suggestions": 1
+    },
+    {
+      "id": "alibaba-open-code-review-issue-90-security-fix",
+      "kind": "clean-security-fix",
+      "result": "no-formal-finding",
+      "invalid_suggestions": 2
+    },
+    {
+      "id": "sherlock-cve-2026-44590-security-fix",
+      "kind": "clean-security-fix",
+      "result": "silent"
+    },
+    {
+      "id": "giskard-agents-cve-2026-34172-security-fix",
+      "kind": "clean-security-fix",
+      "result": "silent"
+    }
+  ]
+}

@@ -118,6 +118,29 @@ class FindingPolicyTests(unittest.TestCase):
         self.assertEqual([candidate], suggestions)
         self.assertIn("repository context is unavailable", decisions[0]["reasons"])
 
+    def test_workflow_shell_probe_supports_command_injection_claim(self):
+        candidate = finding(rule_id="CWE-78", severity=Severity.CRITICAL)
+        candidate.title = "GitHub Actions expression permits command injection"
+        candidate.evidence_refs = [{
+            "evidence_id": "semantic_probe:github-actions-expression-shell",
+            "tool": "semantic_probe",
+            "output": {
+                "kind": "github-actions-expression-shell",
+                "shell_metacharacters_reach_direct_command": True,
+                "arbitrary_code_executed": False,
+            },
+        }]
+
+        published, suggestions, decisions = ModeRouterReviewer._partition_publication(
+            [], [candidate], [candidate],
+            [{"finding_index": 0, "publication_ready": True}],
+            repository_available=False,
+        )
+
+        self.assertEqual([candidate], published)
+        self.assertEqual([], suggestions)
+        self.assertEqual("confirmed", decisions[0]["disposition"])
+
     def test_repository_backed_lead_and_critic_approved_claim_is_publishable(self):
         candidate = finding()
         candidate.evidence_refs = [{

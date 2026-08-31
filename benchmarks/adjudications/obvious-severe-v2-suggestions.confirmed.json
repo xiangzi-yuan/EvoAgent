@@ -1,0 +1,57 @@
+{
+  "schema_version": 1,
+  "status": "confirmed",
+  "reviewer": "codex-manual-semantic-review",
+  "reviewed_at": "2026-08-31",
+  "reviewed_suggestions": 5,
+  "source_report": "output/obvious-severe/agentic-deepseek-v4-flash-v2-uniform-unadjudicated.json",
+  "source_report_sha256": "d5d29e2740e8bff07bf7afaa913295fb5708bb8125c085668ed723ed8939af32",
+  "cases": {
+    "microsoft-agent-governance-toolkit-pr-357": [
+      {
+        "path": "src/governance/sandboxing/sandbox.py",
+        "line": 19,
+        "rule_id": "CWE-770",
+        "severity": "high",
+        "verdict": "required",
+        "note": "ExecutionSandbox 对外声明并接收 CPU/内存限制，但 run_isolated 完全没有使用这两个参数；任意长时间或高内存命令都不受限，直接破坏该安全边界的核心契约。"
+      },
+      {
+        "path": "src/governance/sandboxing/sandbox.py",
+        "line": 19,
+        "rule_id": "CWE-703",
+        "severity": "medium",
+        "verdict": "optional",
+        "note": "为执行器增加超时和统一错误语义是合理增强，但 shell=True 下命令不存在通常表现为非零返回码；没有调用方契约时，不能断言当前异常传播必然错误。"
+      }
+    ],
+    "apache-airflow-cve-2026-59243-security-fix": [
+      {
+        "path": "providers/fab/src/airflow/providers/fab/auth_manager/security_manager/override.py",
+        "line": 2427,
+        "rule_id": "CWE-1188",
+        "severity": "high",
+        "verdict": "invalid",
+        "note": "把 JWT 签名校验默认值改为 True 正是漏洞修复；Finding 没有仓库配置或兼容性证据，却建议保留可关闭校验的迁移出口，不能据此判定认证中断。"
+      }
+    ],
+    "alibaba-open-code-review-issue-90-security-fix": [
+      {
+        "path": "internal/tool/filereader.go",
+        "line": 90,
+        "rule_id": "CWE-22",
+        "severity": "high",
+        "verdict": "invalid",
+        "note": "已有文件会经过 EvalSymlinks 后再次做仓库边界检查；不存在的目标虽返回未解析路径，但随后的只读 ReadFile/Open 会失败。Finding 没有展示可读到仓库外现存文件的路径，TOCTOU 也依赖未证明的本地并发写权限。"
+      },
+      {
+        "path": "internal/tool/filereader.go",
+        "line": 104,
+        "rule_id": "CWE-22",
+        "severity": "high",
+        "verdict": "invalid",
+        "note": "这是上一条不存在文件/符号链接猜测的重复表述；不存在文件无法被只读调用成功打开，现存外部目标则会被 EvalSymlinks 后的第二次边界检查拒绝。"
+      }
+    ]
+  }
+}
