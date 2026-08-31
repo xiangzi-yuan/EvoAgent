@@ -126,7 +126,10 @@ class ProductArmReviewer:
         # Keep evaluation arms on the stable profile: one pass per specialist.
         # Deep investigations can opt into revisions in production, but they are
         # deliberately outside the obvious-defect canary budget.
-        structured_config = {"max_revision_rounds": 0}
+        structured_config = {
+            "max_revision_rounds": 0,
+            "publish_unverified_suggestions": False,
+        }
         self.router = ModeRouterReviewer(
             self.store, client,
             default_token_budget=per_role_tokens,
@@ -214,6 +217,7 @@ class ProductArmReviewer:
                 + len(ContextRuleReviewer.RULES)
             ),
             "max_revision_rounds": self.router._max_revision_rounds(),
+            "publish_unverified_suggestions": False,
             "total_token_budget_per_pr": self.total_token_budget,
             "per_role_token_budget": self.per_role_token_budget,
             "total_time_budget_seconds_per_pr": self.total_time_budget_seconds,

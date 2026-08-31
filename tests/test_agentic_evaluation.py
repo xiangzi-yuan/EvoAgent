@@ -829,7 +829,7 @@ class AgenticEvaluationTests(unittest.TestCase):
 
     def test_agentic_arms_share_stable_rules_and_real_role_topologies(self):
         self.assertEqual(
-            15,
+            18,
             len(LocalRuleReviewer.RULES)
             + len(LocalRuleReviewer.DIFF_RULES)
             + len(ContextRuleReviewer.RULES),
@@ -853,8 +853,11 @@ class AgenticEvaluationTests(unittest.TestCase):
             for item in execution["model_call_log"]:
                 actual[item["role"]] = actual.get(item["role"], 0) + 1
             self.assertEqual(calls, actual)
-            self.assertEqual(15, reviewer.evaluation_config()["deterministic_rules"])
+            self.assertEqual(18, reviewer.evaluation_config()["deterministic_rules"])
             self.assertEqual(0, reviewer.evaluation_config()["max_revision_rounds"])
+            self.assertFalse(
+                reviewer.evaluation_config()["publish_unverified_suggestions"]
+            )
             if arm == "full-agentic":
                 self.assertTrue(any(
                     item["role"] == "critic" and item["tool"] == "changed_line"

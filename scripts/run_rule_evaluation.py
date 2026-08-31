@@ -1,4 +1,4 @@
-"""Evaluate the deterministic 6-rule or 14-rule baseline without model calls."""
+"""Evaluate versioned deterministic baselines without model calls."""
 import argparse
 import json
 import os
@@ -15,19 +15,47 @@ from evoagent.evaluation_harness import (  # noqa: E402
     dataset_fingerprint,
     load_jsonl,
 )
-from evoagent.reviewer import CompositeReviewer, LocalRuleReviewer  # noqa: E402
+from evoagent.reviewer import CompositeReviewer, LocalRuleReviewer, Reviewer  # noqa: E402
+
+
+LEGACY_LOCAL_RULE_IDS = frozenset({
+    "SEC-EVAL",
+    "SEC-SUBPROCESS-SHELL",
+    "SEC-HARDCODED-SECRET",
+    "SEC-SQL-CONCAT",
+    "REL-EMPTY-EXCEPT",
+    "REL-DEBUG-PRINT",
+})
+
+
+class RuleFilterReviewer(Reviewer):
+    name = "versioned-local-rules"
+
+    def __init__(self, reviewer: Reviewer, rule_ids) -> None:
+        self.reviewer = reviewer
+        self.rule_ids = frozenset(rule_ids)
+
+    def review(self, diff, parsed):
+        return [
+            finding for finding in self.reviewer.review(diff, parsed)
+            if finding.rule_id in self.rule_ids
+        ]
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("dataset")
-    parser.add_argument("--rules", type=int, choices=(6, 14), default=14)
+    parser.add_argument("--rules", type=int, choices=(6, 14, 18), default=18)
     parser.add_argument("--output", required=True)
     args = parser.parse_args()
 
     cases = load_jsonl(args.dataset)
-    reviewers = [LocalRuleReviewer()]
-    if args.rules == 14:
+    local = LocalRuleReviewer()
+    reviewers = [
+        local if args.rules == 18
+        else RuleFilterReviewer(local, LEGACY_LOCAL_RULE_IDS)
+    ]
+    if args.rules in {14, 18}:
         reviewers.append(ContextRuleReviewer())
     reviewer = CompositeReviewer(reviewers)
     report = EndToEndEvaluationHarness().run(

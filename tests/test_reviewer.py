@@ -68,6 +68,97 @@ class LocalReviewerTests(unittest.TestCase):
         self.assertEqual(2, findings[0].line)
         self.assertEqual([], fixed_findings)
 
+    def test_detects_insecure_jwt_default_but_not_secure_default(self):
+        regression = (
+            "--- a/auth.py\n+++ b/auth.py\n@@ -1 +1 @@\n"
+            "-verify = options.get('verify_signature', True)\n"
+            "+verify = options.get('verify_signature', False)\n"
+        )
+        security_fix = (
+            "--- a/auth.py\n+++ b/auth.py\n@@ -1 +1 @@\n"
+            "-verify = options.get('verify_signature', False)\n"
+            "+verify = options.get('verify_signature', True)\n"
+        )
+
+        findings = LocalRuleReviewer().review(
+            regression, parse_unified_diff(regression),
+        )
+        fixed_findings = LocalRuleReviewer().review(
+            security_fix, parse_unified_diff(security_fix),
+        )
+
+        self.assertEqual(
+            ["SEC-JWT-SIGNATURE-DISABLED"], [item.rule_id for item in findings],
+        )
+        self.assertEqual([], fixed_findings)
+
+        test_fixture = regression.replace("a/auth.py", "a/tests/test_auth.py").replace(
+            "b/auth.py", "b/tests/test_auth.py"
+        )
+        self.assertEqual([], LocalRuleReviewer().review(
+            test_fixture, parse_unified_diff(test_fixture),
+        ))
+
+    def test_detects_removed_path_resolver_but_not_restored_resolver(self):
+        regression = (
+            "--- a/reader.go\n+++ b/reader.go\n@@ -1,4 +1,2 @@\n"
+            "-fullPath, err := fr.resolveWorkspacePath(path)\n"
+            "-if err != nil { return \"\", err }\n"
+            "+fullPath := filepath.Join(fr.RepoDir, path)\n"
+            " content, err := os.ReadFile(fullPath)\n"
+        )
+        security_fix = (
+            "--- a/reader.go\n+++ b/reader.go\n@@ -1,2 +1,4 @@\n"
+            "-fullPath := filepath.Join(fr.RepoDir, path)\n"
+            "+fullPath, err := fr.resolveWorkspacePath(path)\n"
+            "+if err != nil { return \"\", err }\n"
+            " content, err := os.ReadFile(fullPath)\n"
+        )
+
+        findings = LocalRuleReviewer().review(
+            regression, parse_unified_diff(regression),
+        )
+        fixed_findings = LocalRuleReviewer().review(
+            security_fix, parse_unified_diff(security_fix),
+        )
+
+        self.assertEqual(["SEC-PATH-TRAVERSAL"], [item.rule_id for item in findings])
+        self.assertEqual([], fixed_findings)
+
+    def test_detects_actions_expression_in_run_but_not_env_indirection(self):
+        regression = (
+            "--- a/.github/workflows/check.yml\n"
+            "+++ b/.github/workflows/check.yml\n"
+            "@@ -1,3 +1,3 @@\n"
+            " run: |\n"
+            "-  check \"$VALUE\"\n"
+            "+  check \"${{ steps.discover.outputs.value }}\"\n"
+            " next: true\n"
+        )
+        security_fix = (
+            "--- a/.github/workflows/check.yml\n"
+            "+++ b/.github/workflows/check.yml\n"
+            "@@ -1,3 +1,5 @@\n"
+            "+env:\n"
+            "+  VALUE: ${{ steps.discover.outputs.value }}\n"
+            " run: |\n"
+            "-  check \"${{ steps.discover.outputs.value }}\"\n"
+            "+  check \"$VALUE\"\n"
+            " next: true\n"
+        )
+
+        findings = LocalRuleReviewer().review(
+            regression, parse_unified_diff(regression),
+        )
+        fixed_findings = LocalRuleReviewer().review(
+            security_fix, parse_unified_diff(security_fix),
+        )
+
+        self.assertEqual(
+            ["SEC-GHA-EXPRESSION-IN-SHELL"], [item.rule_id for item in findings],
+        )
+        self.assertEqual([], fixed_findings)
+
 
 if __name__ == "__main__":
     unittest.main()

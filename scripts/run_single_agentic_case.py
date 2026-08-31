@@ -2,6 +2,7 @@
 import argparse
 import json
 import os
+import subprocess
 import sys
 import time
 
@@ -17,6 +18,55 @@ from evoagent.evaluation_v2 import (  # noqa: E402
     ProductionEvaluationHarness,
 )
 from evoagent.llm import JsonChatClient  # noqa: E402
+
+
+def expected_repository_sha(case: dict) -> str:
+    """Return the commit representing the new-file state of the case Diff."""
+    source = case.get("source") or {}
+    if source.get("kind") == "public-security-fix-reversal":
+        return str(source.get("vulnerable_base_sha") or "").strip()
+    return str(
+        source.get("head_sha") or source.get("fixed_head_sha") or ""
+    ).strip()
+
+
+def validate_repository_checkout(case: dict, repository_root: str) -> None:
+    expected = expected_repository_sha(case)
+    if not expected:
+        return
+    actual = ""
+    try:
+        completed = subprocess.run(
+            ["git", "-C", repository_root, "rev-parse", "HEAD"],
+            capture_output=True, text=True, timeout=10, check=False,
+        )
+        if completed.returncode == 0:
+            actual = completed.stdout.strip()
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    if not actual:
+        head_path = os.path.join(repository_root, ".git", "HEAD")
+        try:
+            with open(head_path, "r", encoding="utf-8") as handle:
+                head = handle.read().strip()
+            if not head.startswith("ref:"):
+                actual = head
+            else:
+                ref = head[4:].strip().replace("/", os.sep)
+                with open(
+                    os.path.join(repository_root, ".git", ref),
+                    "r", encoding="utf-8",
+                ) as handle:
+                    actual = handle.read().strip()
+        except OSError:
+            actual = ""
+    if not actual:
+        raise ValueError("--repository-root is not a readable Git checkout")
+    if actual.lower() != expected.lower():
+        raise ValueError(
+            "--repository-root HEAD mismatch: expected %s, got %s"
+            % (expected, actual)
+        )
 
 
 def main() -> None:
@@ -63,6 +113,10 @@ def main() -> None:
         repository_root = os.path.abspath(args.repository_root)
         if not os.path.isdir(repository_root):
             parser.error("--repository-root must be an existing directory")
+        try:
+            validate_repository_checkout(case, repository_root)
+        except ValueError as exc:
+            parser.error(str(exc))
         case = dict(case)
         case["repository_root"] = repository_root
     for finding in case["expected_findings"]:

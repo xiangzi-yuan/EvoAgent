@@ -95,6 +95,34 @@ class FindingPolicyTests(unittest.TestCase):
         self.assertEqual([], suggestions)
         self.assertEqual("confirmed", decisions[0]["disposition"])
 
+    def test_path_probe_does_not_prove_symlink_error_branch_claim(self):
+        candidate = finding(rule_id="CWE-22", severity=Severity.HIGH)
+        candidate.title = "Symlink escape in EvalSymlinks IsNotExist branch"
+        candidate.evidence_refs = [{
+            "evidence_id": "semantic_probe:path-containment",
+            "tool": "semantic_probe",
+            "output": {
+                "kind": "path-containment",
+                "parent_segments_escape_base": True,
+                "arbitrary_code_executed": False,
+            },
+        }]
+
+        published, suggestions, decisions = ModeRouterReviewer._partition_publication(
+            [], [candidate], [candidate],
+            [{"finding_index": 0, "publication_ready": True}],
+            repository_available=False,
+            publish_unverified_suggestions=False,
+        )
+
+        self.assertEqual([], published)
+        self.assertEqual([], suggestions)
+        self.assertEqual("rejected", decisions[0]["disposition"])
+        self.assertIn(
+            "stability profile suppresses unverified suggestions",
+            decisions[0]["reasons"],
+        )
+
     def test_unrelated_semantic_probe_cannot_publish_high_risk_claim(self):
         candidate = finding(rule_id="CWE-347", severity=Severity.HIGH)
         candidate.title = "JWT signature verification disabled"

@@ -29,6 +29,8 @@ CANONICAL_RULE_IDS = frozenset({
     "SEC-OPEN-REDIRECT",
     "SEC-LOG-FORGING",
     "SEC-JINJA-UNSANDBOXED",
+    "SEC-JWT-SIGNATURE-DISABLED",
+    "SEC-GHA-EXPRESSION-IN-SHELL",
 })
 
 RULE_ID_ALIASES = {
@@ -169,6 +171,12 @@ def _semantic_probe_supports_finding(item: dict, finding: Finding) -> bool:
         str(finding.rule_id), str(finding.title), str(finding.explanation),
         str(finding.evidence),
     )).lower()
+    if kind == "path-containment" and any(
+        cue in claim for cue in ("symlink", "evalsymlinks", "isnotexist", "toctou")
+    ):
+        # This probe only proves lexical parent-segment escape after Join. It
+        # does not create symlinks or exercise filesystem race/error branches.
+        return False
     cues = {
         "path-containment": ("cwe-22", "path traversal", "containment", "filepath"),
         "security-control-default": (

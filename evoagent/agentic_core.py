@@ -836,6 +836,9 @@ class ModeRouterReviewer(Reviewer):
             rule_findings, candidates, lead_accepted,
             session["critic_decisions"], suite.repository_available,
             critic_required="critic" in enabled,
+            publish_unverified_suggestions=bool(
+                self.structured_config.get("publish_unverified_suggestions", True)
+            ),
         )
         session["lead_accepted_findings"] = [item.to_dict() for item in lead_accepted]
         session["accepted_findings"] = [item.to_dict() for item in accepted]
@@ -1632,6 +1635,7 @@ class ModeRouterReviewer(Reviewer):
     def _partition_publication(
         cls, rule_findings, candidates, lead_accepted, critic_decisions,
         repository_available, critic_required=True,
+        publish_unverified_suggestions=True,
     ):
         """Protect deterministic findings and quarantine unverified LLM discoveries."""
         lead_identities = {finding_identity(item) for item in lead_accepted}
@@ -1703,7 +1707,7 @@ class ModeRouterReviewer(Reviewer):
                 }
                 published.append(finding)
                 disposition = "confirmed"
-            elif lead_selected:
+            elif lead_selected and publish_unverified_suggestions:
                 finding.disposition = "suggestion"
                 finding.gate = {
                     "passed": False, "disposition": "suggestion",
@@ -1713,6 +1717,10 @@ class ModeRouterReviewer(Reviewer):
                 }
                 suggestions.append(finding)
                 disposition = "suggestion"
+            elif lead_selected:
+                finding.disposition = "rejected"
+                reasons.append("stability profile suppresses unverified suggestions")
+                disposition = "rejected"
             else:
                 disposition = "rejected"
             decisions.append({

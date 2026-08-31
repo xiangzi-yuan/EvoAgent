@@ -9,13 +9,25 @@ from typing import Any, Dict, List, Optional
 
 from .diff_parser import ParsedDiff
 from .finding_policy import normalize_rule_id
-from .models import Finding, Severity
+from .models import ChangedLine, Finding, Severity
 
 
 PLACEHOLDER_SECRET = re.compile(
     r"(?i)(?:(?:^|[-_ .])(?:test|example|dummy|fake|placeholder|changeme|redacted)"
     r"(?:$|[-_ .])|not[-_ ]?a[-_ ]?secret)"
 )
+
+
+def is_test_path(path: str) -> bool:
+    normalized = path.replace("\\", "/").lower()
+    name = normalized.rsplit("/", 1)[-1]
+    return bool(
+        normalized.startswith(("test/", "tests/"))
+        or "/test/" in normalized
+        or "/tests/" in normalized
+        or name.startswith("test_")
+        or name.endswith(("_test.py", "_test.go"))
+    )
 
 
 def suppress_contextual_false_positive(
@@ -37,6 +49,8 @@ def suppress_contextual_false_positive(
             ".github/discussion_template/",
             ".github/issue_template/",
         )) or normalized.endswith((".md", ".mdx", ".rst"))
+    if rule_id == "SEC-JWT-SIGNATURE-DISABLED":
+        return is_test_path(path)
     return False
 
 
@@ -90,6 +104,17 @@ class LocalRuleReviewer(Reviewer):
             "加入引号、注释符和布尔表达式等注入载荷测试。",
         ),
         (
+            "SEC-JWT-SIGNATURE-DISABLED",
+            Severity.CRITICAL,
+            re.compile(
+                r"\.get\(\s*['\"]verify_signature['\"]\s*,\s*False\s*\)"
+            ),
+            "JWT 签名校验默认关闭",
+            "缺少配置时默认跳过 JWT 签名验证，会让未认证的令牌内容被当作可信身份。",
+            "将 verify_signature 的安全默认值设为 True，并只允许显式测试配置关闭验证。",
+            "加入未签名、伪造签名和缺少配置的令牌测试，断言它们都被拒绝。",
+        ),
+        (
             "REL-EMPTY-EXCEPT",
             Severity.MEDIUM,
             re.compile(r"^\s*except\s*(Exception\s*)?:\s*(pass)?\s*$"),
@@ -114,6 +139,8 @@ class LocalRuleReviewer(Reviewer):
     # distinguish from legitimate code.
     DIFF_RULES = (
         "SEC-JINJA-UNSANDBOXED",
+        "SEC-PATH-TRAVERSAL",
+        "SEC-GHA-EXPRESSION-IN-SHELL",
     )
 
     def review(self, diff: str, parsed: ParsedDiff) -> List[Finding]:
@@ -156,6 +183,8 @@ class LocalRuleReviewer(Reviewer):
                         )
                     )
         findings.extend(self._jinja_sandbox_downgrade(diff, parsed, seen))
+        findings.extend(self._path_containment_removal(diff, parsed, seen))
+        findings.extend(self._github_actions_expression_shell(diff, parsed, seen))
         return findings
 
     @staticmethod
@@ -195,6 +224,7 @@ class LocalRuleReviewer(Reviewer):
             if (
                 line.path not in removed_sandbox_by_path
                 or line.path in emitted_paths
+                or is_test_path(line.path)
                 or not constructor.search(line.content)
                 or identity in seen
             ):
@@ -236,6 +266,189 @@ class LocalRuleReviewer(Reviewer):
                 source="local-rule-scanner",
             ))
         return findings
+
+    @staticmethod
+    def _path_containment_removal(
+        diff: str, parsed: ParsedDiff, seen: set,
+    ) -> List[Finding]:
+        """Detect replacement of an error-returning safe resolver with Join.
+
+        ``filepath.Join`` normalizes a path but does not prove it remains under
+        the intended root. Requiring removal of a resolver/validator call with
+        the same destination and input avoids flagging ordinary path joins.
+        """
+        removed_by_path: Dict[str, List[str]] = {}
+        current_path = ""
+        in_hunk = False
+        for raw in diff.splitlines():
+            if raw.startswith("+++ "):
+                current_path = raw[4:].strip()
+                if current_path.startswith("b/"):
+                    current_path = current_path[2:]
+                in_hunk = False
+                continue
+            if raw.startswith("@@ "):
+                in_hunk = True
+                continue
+            if in_hunk and raw.startswith("-") and not raw.startswith("---"):
+                removed_by_path.setdefault(current_path or "unknown", []).append(raw[1:])
+
+        removed_resolver = re.compile(
+            r"(?i)\b(?P<target>[A-Za-z_]\w*)\s*,\s*err\s*:=\s*"
+            r"(?:[A-Za-z_]\w*\.)?(?P<helper>(?:resolve|safe|secure|validate|contain)\w*)"
+            r"\s*\(\s*(?P<input>[A-Za-z_]\w*)\s*\)"
+        )
+        added_join = re.compile(
+            r"\b(?P<target>[A-Za-z_]\w*)\s*:=\s*filepath\.Join\("
+            r"[^,\n]+,\s*(?P<input>[A-Za-z_]\w*)\s*\)"
+        )
+        removed_contracts = {}
+        for path, lines in removed_by_path.items():
+            removed_contracts[path] = [
+                match.groupdict()
+                for content in lines
+                for match in [removed_resolver.search(content)]
+                if match
+            ]
+
+        findings = []
+        for line in parsed.added_lines:
+            match = added_join.search(line.content)
+            if is_test_path(line.path) or not match or not any(
+                item["target"] == match.group("target")
+                and item["input"] == match.group("input")
+                for item in removed_contracts.get(line.path, [])
+            ):
+                continue
+            identity = ("SEC-PATH-TRAVERSAL", line.path, line.line)
+            if identity in seen:
+                continue
+            seen.add(identity)
+            findings.append(LocalRuleReviewer._cross_line_finding(
+                "SEC-PATH-TRAVERSAL", Severity.HIGH,
+                "路径边界校验被普通 Join 替换",
+                (
+                    "同一文件删除了会返回错误的安全路径解析调用，并改为直接 "
+                    "filepath.Join；Join 会规范化父目录片段，但不会证明结果仍位于仓库根目录。"
+                ),
+                line,
+                "恢复受根目录约束的解析函数，并在读取前校验规范化路径仍位于允许目录内。",
+                "加入 ../、绝对路径和符号链接边界测试，断言无法读取仓库目录之外的文件。",
+            ))
+        return findings
+
+    @staticmethod
+    def _github_actions_expression_shell(
+        diff: str, parsed: ParsedDiff, seen: set,
+    ) -> List[Finding]:
+        """Detect PR/step-output expressions interpolated directly in run blocks."""
+        del parsed  # New-file line numbers are reconstructed from hunk headers below.
+        hunk = re.compile(r"^@@ -(?:\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@")
+        expression = re.compile(
+            r"\$\{\{\s*(?:github\.(?:event|head_ref|base_ref)\b|"
+            r"steps\.[^}]+\.outputs\.)",
+            re.IGNORECASE,
+        )
+        run_decl = re.compile(r"^(?P<indent>\s*)run\s*:\s*(?:[|>]|.+)$")
+        current_path = ""
+        new_line = 0
+        in_hunk = False
+        run_indent = None
+        findings = []
+        for raw in diff.splitlines():
+            if raw.startswith("+++ "):
+                current_path = raw[4:].strip()
+                if current_path.startswith("b/"):
+                    current_path = current_path[2:]
+                in_hunk = False
+                run_indent = None
+                continue
+            match = hunk.match(raw)
+            if match:
+                new_line = int(match.group(1))
+                in_hunk = True
+                run_indent = None
+                continue
+            if not in_hunk or raw.startswith("\\ No newline"):
+                continue
+            if raw.startswith("-") and not raw.startswith("---"):
+                continue
+            if raw.startswith("+") and not raw.startswith("+++"):
+                kind, content, line_number = "added", raw[1:], new_line
+                new_line += 1
+            else:
+                kind = "context"
+                content = raw[1:] if raw.startswith(" ") else raw
+                line_number = new_line
+                new_line += 1
+
+            stripped = content.strip()
+            indent = len(content) - len(content.lstrip())
+            declaration = run_decl.match(content)
+            if (
+                run_indent is not None and stripped and indent <= run_indent
+                and declaration is None and not stripped.startswith("#")
+            ):
+                run_indent = None
+            if declaration:
+                run_indent = len(declaration.group("indent"))
+            in_run = bool(
+                declaration or (run_indent is not None and indent > run_indent)
+            )
+            normalized_path = current_path.replace("\\", "/").lower()
+            if not (
+                kind == "added"
+                and normalized_path.startswith(".github/workflows/")
+                and normalized_path.endswith((".yml", ".yaml"))
+                and in_run
+                and expression.search(content)
+            ):
+                continue
+            identity = ("SEC-GHA-EXPRESSION-IN-SHELL", current_path, line_number)
+            if identity in seen:
+                continue
+            seen.add(identity)
+            line = ChangedLine(current_path, line_number, content)
+            findings.append(LocalRuleReviewer._cross_line_finding(
+                "SEC-GHA-EXPRESSION-IN-SHELL", Severity.CRITICAL,
+                "GitHub Actions 表达式直接进入 shell",
+                (
+                    "run 块直接插入 PR 事件字段或上游步骤输出；表达式会先展开为脚本文本，"
+                    "其中的 shell 元字符可能改变实际执行的命令。"
+                ),
+                line,
+                "先把表达式赋给 env，再在脚本中以双引号引用环境变量，并校验允许值。",
+                "加入包含引号、换行和命令替换字符的输出测试，确认它只能作为单个数据参数。",
+            ))
+        return findings
+
+    @staticmethod
+    def _cross_line_finding(
+        rule_id: str, severity: Severity, title: str, explanation: str,
+        line, fix: str, test: str,
+    ) -> Finding:
+        return Finding(
+            rule_id=rule_id,
+            severity=severity,
+            title=title,
+            explanation=explanation,
+            path=line.path,
+            line=line.line,
+            evidence=line.content.strip()[:240],
+            fix=fix,
+            test=test,
+            confidence=0.98,
+            evidence_refs=[{
+                "evidence_id": "local-rule:%s" % hashlib.sha256(
+                    (rule_id + line.path + str(line.line) + line.content).encode("utf-8")
+                ).hexdigest()[:16],
+                "tool": "local-rule-scanner",
+                "rule_id": rule_id,
+                "path": line.path,
+                "line": line.line,
+            }],
+            source="local-rule-scanner",
+        )
 
 
 class DomainRuleReviewer(Reviewer):
@@ -282,7 +495,7 @@ class SecurityRuleReviewer(DomainRuleReviewer):
     domains = ("security", "authorization")
     rule_ids = frozenset({
         "SEC-EVAL", "SEC-SUBPROCESS-SHELL", "SEC-HARDCODED-SECRET",
-        "SEC-SQL-CONCAT",
+        "SEC-SQL-CONCAT", "SEC-JWT-SIGNATURE-DISABLED",
     })
 
 
