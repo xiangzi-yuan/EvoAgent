@@ -109,6 +109,13 @@ class LocalRuleReviewer(Reviewer):
         ),
     ]
 
+    # Cross-line guards intentionally stay small and high-signal. They cover
+    # security-control regressions that a single added-line regex cannot
+    # distinguish from legitimate code.
+    DIFF_RULES = (
+        "SEC-JINJA-UNSANDBOXED",
+    )
+
     def review(self, diff: str, parsed: ParsedDiff) -> List[Finding]:
         findings: List[Finding] = []
         seen = set()
@@ -148,6 +155,86 @@ class LocalRuleReviewer(Reviewer):
                             source="local-rule-scanner",
                         )
                     )
+        findings.extend(self._jinja_sandbox_downgrade(diff, parsed, seen))
+        return findings
+
+    @staticmethod
+    def _jinja_sandbox_downgrade(
+        diff: str, parsed: ParsedDiff, seen: set,
+    ) -> List[Finding]:
+        """Flag a same-file replacement of Jinja's sandbox with Environment.
+
+        Requiring both removal of ``SandboxedEnvironment`` and addition of an
+        actual unrestricted constructor keeps this narrower than matching an
+        ordinary ``Environment`` import or type annotation.
+        """
+        removed_sandbox_by_path = set()
+        current_path = ""
+        in_hunk = False
+        for raw in diff.splitlines():
+            if raw.startswith("+++ "):
+                current_path = raw[4:].strip()
+                if current_path.startswith("b/"):
+                    current_path = current_path[2:]
+                in_hunk = False
+                continue
+            if raw.startswith("@@ "):
+                in_hunk = True
+                continue
+            if (
+                in_hunk and raw.startswith("-") and not raw.startswith("---")
+                and "SandboxedEnvironment" in raw
+            ):
+                removed_sandbox_by_path.add(current_path or "unknown")
+
+        constructor = re.compile(r"(?:=|\breturn)\s*Environment\s*\(")
+        findings = []
+        emitted_paths = set()
+        for line in parsed.added_lines:
+            identity = ("SEC-JINJA-UNSANDBOXED", line.path, line.line)
+            if (
+                line.path not in removed_sandbox_by_path
+                or line.path in emitted_paths
+                or not constructor.search(line.content)
+                or identity in seen
+            ):
+                continue
+            seen.add(identity)
+            emitted_paths.add(line.path)
+            findings.append(Finding(
+                rule_id="SEC-JINJA-UNSANDBOXED",
+                severity=Severity.HIGH,
+                title="Jinja 沙箱被替换为非受限环境",
+                explanation=(
+                    "同一文件删除了 SandboxedEnvironment，并在新增代码中构造普通 "
+                    "Environment；若模板内容可受外部输入影响，这会移除模板执行的安全边界。"
+                ),
+                path=line.path,
+                line=line.line,
+                evidence=line.content.strip()[:240],
+                fix=(
+                    "保留 SandboxedEnvironment，并继续使用严格未定义值和受控 loader；"
+                    "不要把不可信模板交给普通 Environment。"
+                ),
+                test=(
+                    "加入包含属性链和危险表达式的不可信模板回归测试，断言沙箱拒绝执行，"
+                    "同时验证受支持模板仍可渲染。"
+                ),
+                confidence=0.98,
+                evidence_refs=[{
+                    "evidence_id": "local-rule:%s" % hashlib.sha256(
+                        (
+                            "SEC-JINJA-UNSANDBOXED" + line.path
+                            + str(line.line) + line.content
+                        ).encode("utf-8")
+                    ).hexdigest()[:16],
+                    "tool": "local-rule-scanner",
+                    "rule_id": "SEC-JINJA-UNSANDBOXED",
+                    "path": line.path,
+                    "line": line.line,
+                }],
+                source="local-rule-scanner",
+            ))
         return findings
 
 

@@ -445,6 +445,13 @@ class ModeRouterReviewer(Reviewer):
         except (TypeError, ValueError):
             return self.default_token_budget
 
+    def _max_revision_rounds(self) -> int:
+        raw = self.structured_config.get("max_revision_rounds", 2)
+        try:
+            return max(0, min(int(raw), 2))
+        except (TypeError, ValueError):
+            return 2
+
     def review(self, diff: str, parsed: ParsedDiff) -> List[Finding]:
         raise RuntimeError(
             "agentic review requires review_with_context and a configured model"
@@ -702,7 +709,7 @@ class ModeRouterReviewer(Reviewer):
         session["phase"] = "workers-completed"
         self._save_lead_session(task_id, session, ledger)
 
-        max_revision_rounds = 2
+        max_revision_rounds = self._max_revision_rounds()
         final_assessment = {}
         for assessment_index in range(max_revision_rounds + 1):
             candidates = self._session_candidates(session)
@@ -731,7 +738,11 @@ class ModeRouterReviewer(Reviewer):
             )
             if not requests or assessment_index >= max_revision_rounds:
                 if requests:
-                    session["stop_reason"] = "revision-budget-exhausted"
+                    session["stop_reason"] = (
+                        "revision-skipped-stability-profile"
+                        if max_revision_rounds == 0
+                        else "revision-budget-exhausted"
+                    )
                 break
             revision_assignments = []
             for request in requests:

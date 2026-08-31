@@ -42,6 +42,32 @@ class LocalReviewerTests(unittest.TestCase):
         self.assertEqual("app.py", findings[0].path)
         self.assertEqual("REL-DEBUG-PRINT", findings[0].rule_id)
 
+    def test_detects_jinja_sandbox_downgrade_but_not_security_fix(self):
+        regression = (
+            "--- a/environment.py\n+++ b/environment.py\n@@ -1,2 +1,2 @@\n"
+            "-from jinja2.sandbox import SandboxedEnvironment\n"
+            "+from jinja2 import Environment\n"
+            "-env = SandboxedEnvironment()\n+env = Environment()\n"
+            "-return SandboxedEnvironment()\n+return Environment()\n"
+        )
+        security_fix = (
+            "--- a/environment.py\n+++ b/environment.py\n@@ -1,2 +1,2 @@\n"
+            "-from jinja2 import Environment\n"
+            "+from jinja2.sandbox import SandboxedEnvironment\n"
+            "-env = Environment()\n+env = SandboxedEnvironment()\n"
+        )
+
+        findings = LocalRuleReviewer().review(
+            regression, parse_unified_diff(regression),
+        )
+        fixed_findings = LocalRuleReviewer().review(
+            security_fix, parse_unified_diff(security_fix),
+        )
+
+        self.assertEqual(["SEC-JINJA-UNSANDBOXED"], [item.rule_id for item in findings])
+        self.assertEqual(2, findings[0].line)
+        self.assertEqual([], fixed_findings)
+
 
 if __name__ == "__main__":
     unittest.main()

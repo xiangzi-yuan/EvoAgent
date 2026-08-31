@@ -123,14 +123,17 @@ class ProductArmReviewer:
         self.per_role_time_budget_seconds = per_role_seconds
         self.expected_roles = roles
         self.store = _EvaluationTaskStore(task_input)
-        # LocalRuleReviewer contributes six rules. ContextRuleReviewer contributes
-        # the same eight supplemental rules to every arm, for exactly 14 total.
+        # Keep evaluation arms on the stable profile: one pass per specialist.
+        # Deep investigations can opt into revisions in production, but they are
+        # deliberately outside the obvious-defect canary budget.
+        structured_config = {"max_revision_rounds": 0}
         self.router = ModeRouterReviewer(
             self.store, client,
             default_token_budget=per_role_tokens,
             default_time_budget=per_role_seconds,
             enabled_roles=enabled,
             scanners=[ContextRuleReviewer()],
+            structured_config=structured_config,
         )
         self._sequence = 0
         self._last_summary: Dict[str, Any] = {}
@@ -205,7 +208,12 @@ class ProductArmReviewer:
             "arm": self.arm,
             "mode": ARM_TOPOLOGY[self.arm]["mode"],
             "roles": list(self.expected_roles),
-            "deterministic_rules": 14,
+            "deterministic_rules": (
+                len(self.router.rules.RULES)
+                + len(self.router.rules.DIFF_RULES)
+                + len(ContextRuleReviewer.RULES)
+            ),
+            "max_revision_rounds": self.router._max_revision_rounds(),
             "total_token_budget_per_pr": self.total_token_budget,
             "per_role_token_budget": self.per_role_token_budget,
             "total_time_budget_seconds_per_pr": self.total_time_budget_seconds,

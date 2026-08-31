@@ -827,8 +827,13 @@ class AgenticEvaluationTests(unittest.TestCase):
         self.assertEqual(2, rescored["combined_tp_after_verification"])
         self.assertEqual(2, len(rescored["expected_findings"]))
 
-    def test_agentic_arms_share_exactly_fourteen_rules_and_real_role_topologies(self):
-        self.assertEqual(14, len(LocalRuleReviewer.RULES) + len(ContextRuleReviewer.RULES))
+    def test_agentic_arms_share_stable_rules_and_real_role_topologies(self):
+        self.assertEqual(
+            15,
+            len(LocalRuleReviewer.RULES)
+            + len(LocalRuleReviewer.DIFF_RULES)
+            + len(ContextRuleReviewer.RULES),
+        )
         expected_calls = {
             "multi-llm-no-critic": {
                 "lead": 3, "security": 1, "correctness-reliability": 1,
@@ -848,7 +853,8 @@ class AgenticEvaluationTests(unittest.TestCase):
             for item in execution["model_call_log"]:
                 actual[item["role"]] = actual.get(item["role"], 0) + 1
             self.assertEqual(calls, actual)
-            self.assertEqual(14, reviewer.evaluation_config()["deterministic_rules"])
+            self.assertEqual(15, reviewer.evaluation_config()["deterministic_rules"])
+            self.assertEqual(0, reviewer.evaluation_config()["max_revision_rounds"])
             if arm == "full-agentic":
                 self.assertTrue(any(
                     item["role"] == "critic" and item["tool"] == "changed_line"
