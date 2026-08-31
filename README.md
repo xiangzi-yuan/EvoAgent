@@ -195,6 +195,20 @@ python scripts/run_full_agentic_batch.py output/real-pr-reviewed-10-targeted-v2.
 
 提交 `24af53c` 的统一 10 PR 重跑执行成功率为 90%（mypy 案例收到模型截断 JSON），目标 Review 召回 10%。人工复核全部 6 条额外正式 Finding 后均判为无效，因此正式层人工裁决精度为 14.29%、噪声率为 85.71%；8 条建议中 4 条 optional、4 条 invalid，建议效用率为 50%。该次运行共记录 926,071 tokens。结果证明单纯增加探针仍不足：SQLModel 探针虽然执行了，Lead 的 workflow 导向任务却淹没了生产源码结论。后续任务分解已改为给未覆盖生产源码创建独立 `correctness-source-coverage` assignment，避免只把源码路径附加到不相关的 workflow 任务。
 
+### L0 明显严重缺陷冒烟集
+
+`benchmarks/obvious_severe_smoke.jsonl` 用于回答更窄的产品问题：系统能否稳定发现 Diff 中最明显、最严重且有公开证据的主缺陷。它包含 1 条真实坏 PR（命令注入）和 2 条公开安全修复的反向回归回放（JWT 不验签、路径穿越）。反向回放均显式标注 `public-security-fix-reversal`，不能表述为原修复 PR 自己引入了漏洞，也不能用这个 3 条集合估计真实生产 Precision。
+
+DeepSeek V4 Flash 四角色链路在 3 条上的统一缓存报告为：执行成功率 100%、主缺陷 Recall 100%、高风险 Recall 100%、精确行命中率 100%。3 个必修 Finding 全部命中，另有 1 个经人工标为 optional 的低风险日志建议，0 个 invalid Finding；因此原始 Precision 为 75%，人工裁决效用率为 100%，噪声率为 0%。机器可读基线见 `benchmarks/obvious_severe_smoke_baseline.json`，完整执行记录见 `output/obvious-severe/agentic-deepseek-v4-flash-three-cases-final.json`。
+
+本轮为两个可局部证明的失败模式增加了固定语义探针：`security-control-default` 验证缺失配置时安全控制是否默认关闭，`path-containment` 验证父目录片段是否逃逸基目录。探针不访问网络、不读取文件、不执行被审代码；高风险 Finding 仍需 Lead、Critic 和与结论类型相匹配的行为证据。仓库上下文可通过单例运行器临时覆盖：
+
+```powershell
+python scripts/run_single_agentic_case.py benchmarks/obvious_severe_smoke.jsonl --case-id alibaba-open-code-review-issue-90-regression --repository-root output/obvious-severe-checkouts/alibaba-open-code-review-pr-109 --output output/obvious-severe/alibaba.json
+```
+
+`--seed-report` 可重复传入，把多个已经完成的单例无模型调用地合并成批量报告。
+
 项目启动时会自动读取项目根目录的 `.env`，也兼容 `evoagent/.env`；系统环境变量优先于 `.env` 文件。推荐将以下内容写入根目录 `.env`（该文件已被 `.gitignore` 忽略）：
 
 ```env

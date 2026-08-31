@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "name": "obvious-severe-smoke",
+  "purpose": "L0 diagnostic for obvious, severe, locally verifiable primary PR defects",
+  "dataset": {
+    "path": "benchmarks/obvious_severe_smoke.jsonl",
+    "sha256": "94539fbb62b794695427f4056589bd70db07a1c9c40ef09c451cd984916d26d6",
+    "cases": 3,
+    "real_bad_prs": 1,
+    "public_security_fix_reversals": 2,
+    "production_readiness_claimed": false,
+    "limitations": [
+      "This small selected set is a diagnostic smoke gate, not an unbiased production estimate.",
+      "Security-fix reversals preserve real vulnerable behavior but are not represented as the direction of the original fix PR.",
+      "There are no clean cases, so this run does not estimate clean-PR accuracy."
+    ]
+  },
+  "model": {
+    "provider": "deepseek",
+    "name": "deepseek-v4-flash"
+  },
+  "result": {
+    "report": "output/obvious-severe/agentic-deepseek-v4-flash-three-cases-final.json",
+    "execution_success_rate": 1.0,
+    "required_tp": 3,
+    "raw_fp": 1,
+    "required_fn": 0,
+    "raw_precision": 0.75,
+    "required_recall": 1.0,
+    "raw_f1": 0.8571,
+    "high_risk_recall": 1.0,
+    "evidence_accuracy": 1.0,
+    "exact_line_accuracy": 1.0,
+    "severity_accuracy": 0.6667,
+    "formal_optional_findings": 1,
+    "formal_invalid_findings": 0,
+    "adjudicated_formal_utility_rate": 1.0,
+    "formal_nuisance_rate": 0.0,
+    "llm_calls": 36,
+    "total_tokens": 146399,
+    "average_latency_ms_per_pr": 32317.33
+  },
+  "cases": [
+    {
+      "id": "microsoft-agent-governance-toolkit-pr-357",
+      "provenance": "public-github-pr",
+      "primary_defect": "CWE-78 command injection through shell=True",
+      "expected_line": 19,
+      "result": "required-hit",
+      "extra_findings": "one optional low-risk command logging finding",
+      "source": "https://github.com/microsoft/agent-governance-toolkit/pull/357"
+    },
+    {
+      "id": "apache-airflow-cve-2026-59243-regression",
+      "provenance": "public-security-fix-reversal",
+      "primary_defect": "CWE-347 JWT signature verification disabled by default",
+      "expected_line": 2427,
+      "result": "required-hit",
+      "source": "https://github.com/apache/airflow/pull/69374",
+      "advisory": "https://github.com/advisories/GHSA-q5r3-w69r-hrfw"
+    },
+    {
+      "id": "alibaba-open-code-review-issue-90-regression",
+      "provenance": "public-security-fix-reversal",
+      "primary_defect": "CWE-22 repository path traversal and arbitrary file read",
+      "expected_line": 79,
+      "result": "required-hit",
+      "repository_context_used": true,
+      "source": "https://github.com/alibaba/open-code-review/pull/109",
+      "issue": "https://github.com/alibaba/open-code-review/issues/90"
+    }
+  ]
+}

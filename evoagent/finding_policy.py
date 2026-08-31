@@ -119,6 +119,10 @@ def claim_specific_high_risk_evidence_refs(finding: Finding) -> List[dict]:
     supported = [
         item for item in refs
         if str(item.get("tool")) in BEHAVIORAL_EVIDENCE_TOOLS
+        and (
+            str(item.get("tool")) != "semantic_probe"
+            or _semantic_probe_supports_finding(item, finding)
+        )
     ]
     origin = (_normalized_evidence_path(finding.path), int(finding.line))
     chain = []
@@ -146,6 +150,44 @@ def claim_specific_high_risk_evidence_refs(finding: Finding) -> List[dict]:
         ):
             supported.append(item)
     return supported
+
+
+def _semantic_probe_supports_finding(item: dict, finding: Finding) -> bool:
+    payload = item.get("output")
+    if payload is None:
+        payload = item.get("output_preview")
+    if isinstance(payload, str):
+        try:
+            payload = json.loads(payload)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return False
+    if not isinstance(payload, dict):
+        return False
+    kind = str(payload.get("kind", "")).strip().lower()
+    claim = " ".join((
+        str(finding.rule_id), str(finding.title), str(finding.explanation),
+        str(finding.evidence),
+    )).lower()
+    cues = {
+        "path-containment": ("cwe-22", "path traversal", "containment", "filepath"),
+        "security-control-default": (
+            "cwe-287", "cwe-347", "signature", "verify_signature", "authentication",
+        ),
+        "url-normalization-redaction": (
+            "url", "redact", "credential", "cwe-200", "cwe-522", "cwe-532",
+        ),
+        "tri-state-boolean": ("tri-state", "boolean", "none", "default"),
+        "serialization-exclusion-update": (
+            "serializ", "model_dump", "exclude", "update",
+        ),
+        "equality-negation-contract": ("__eq__", "__ne__", "equality", "negation"),
+        "decorator-order": ("decorator", "classmethod"),
+        "self-cycle-collection": ("cycle", "garbage collect", "gc"),
+        "alias-configuration-direction": (
+            "validation_alias", "validate_by_alias", "alias",
+        ),
+    }
+    return kind in cues and any(cue in claim for cue in cues[kind])
 
 
 def _normalized_evidence_path(path: str) -> str:

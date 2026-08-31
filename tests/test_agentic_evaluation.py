@@ -139,6 +139,38 @@ class AgenticEvaluationTests(unittest.TestCase):
         self.assertFalse(output["network_used"])
         self.assertFalse(output["arbitrary_code_executed"])
 
+    def test_semantic_preflight_runs_without_repository_checkout(self):
+        class RecordingTools:
+            def __init__(self):
+                self.calls = []
+
+            def names(self):
+                return [
+                    "read_file", "search_repository", "semantic_probe", "ast_analyze",
+                ]
+
+            def invoke(self, name, arguments):
+                self.calls.append((name, dict(arguments)))
+                return RepositoryToolSuite.semantic_probe(arguments["kind"])
+
+        parsed = parse_unified_diff(
+            "--- a/auth.py\n+++ b/auth.py\n"
+            "@@ -9 +9 @@\n"
+            "-verify_signature = options.get('verify_signature', True)\n"
+            "+verify_signature = options.get('verify_signature', False)\n"
+        )
+        tools = RecordingTools()
+
+        observations = ModeRouterReviewer._repository_preflight(
+            {"files": parsed.files}, parsed, tools, repository_available=False,
+        )
+
+        self.assertEqual(
+            [("semantic_probe", {"kind": "security-control-default"})],
+            tools.calls,
+        )
+        self.assertTrue(observations[0]["ok"])
+
     def test_fixed_semantic_probes_cover_common_cross_line_contracts(self):
         serialization = RepositoryToolSuite.semantic_probe(
             "serialization-exclusion-update"
@@ -151,6 +183,10 @@ class AgenticEvaluationTests(unittest.TestCase):
         alias = RepositoryToolSuite.semantic_probe(
             "alias-configuration-direction"
         )["output"]
+        path = RepositoryToolSuite.semantic_probe("path-containment")["output"]
+        security_default = RepositoryToolSuite.semantic_probe(
+            "security-control-default"
+        )["output"]
 
         self.assertTrue(serialization["excluded_field_update_lost"])
         self.assertTrue(equality["contract_violated"])
@@ -160,9 +196,16 @@ class AgenticEvaluationTests(unittest.TestCase):
             ["field_name", "validation_alias"],
             [item["selected_key"] for item in alias["truth_table"]],
         )
+        self.assertTrue(path["parent_segments_escape_base"])
+        self.assertFalse(path["filesystem_read"])
+        self.assertTrue(security_default["security_control_disabled_by_default"])
+        self.assertFalse(security_default["verification_branch_entered"])
         self.assertTrue(all(
             item["arbitrary_code_executed"] is False
-            for item in (serialization, equality, decorators, cycle, alias)
+            for item in (
+                serialization, equality, decorators, cycle, alias, path,
+                security_default,
+            )
         ))
 
     def test_expected_finding_can_declare_review_taxonomy_aliases(self):

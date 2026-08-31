@@ -181,7 +181,10 @@ def main() -> None:
     parser.add_argument("--timeout", type=int, default=60)
     parser.add_argument("--token-budget", type=int, default=16000)
     parser.add_argument("--time-budget", type=int, default=120)
-    parser.add_argument("--seed-report", default="")
+    parser.add_argument(
+        "--seed-report", action="append", default=[],
+        help="Reuse completed cases from this report; repeat for multiple reports.",
+    )
     parser.add_argument(
         "--cached-only", action="store_true",
         help="Fail instead of calling the model when any selected case is absent from cache.",
@@ -229,10 +232,11 @@ def main() -> None:
     allowed_ids = {case["id"] for case in selected}
     output = os.path.abspath(args.output)
     completed = load_results(output, allowed_ids)
-    completed.update(load_results(
-        os.path.abspath(args.seed_report), allowed_ids,
-        include_failures=args.cached_only,
-    ))
+    for seed_report in args.seed_report:
+        completed.update(load_results(
+            os.path.abspath(seed_report), allowed_ids,
+            include_failures=args.cached_only,
+        ))
     missing_cached = [case["id"] for case in selected if case["id"] not in completed]
     if args.cached_only and missing_cached:
         parser.error(

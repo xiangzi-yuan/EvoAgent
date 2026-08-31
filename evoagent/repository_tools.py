@@ -257,6 +257,41 @@ class RepositoryToolSuite:
     def semantic_probe(kind: str) -> dict:
         """Run a fixed, side-effect-free language or data-transformation probe."""
         kind = str(kind).strip().lower()
+        if kind == "path-containment":
+            base = os.path.abspath(os.path.join(os.sep, "workspace", "repository"))
+            relative = os.path.join("..", "..", "sensitive.txt")
+            resolved = os.path.abspath(os.path.join(base, relative))
+            try:
+                contained = os.path.commonpath([base, resolved]) == base
+            except ValueError:
+                contained = False
+            return _evidence("semantic_probe", {
+                "kind": kind,
+                "operation": "join-base-with-parent-segments-then-normalize",
+                "base": base,
+                "relative_input": relative,
+                "resolved": resolved,
+                "contained_under_base": contained,
+                "parent_segments_escape_base": not contained,
+                "network_used": False,
+                "filesystem_read": False,
+                "arbitrary_code_executed": False,
+            })
+        if kind == "security-control-default":
+            configuration = {}
+            default = False
+            effective = configuration.get("verify_signature", default)
+            return _evidence("semantic_probe", {
+                "kind": kind,
+                "operation": "missing-configuration-uses-security-control-default",
+                "configuration": configuration,
+                "default": default,
+                "effective_verify_signature": effective,
+                "verification_branch_entered": bool(effective),
+                "security_control_disabled_by_default": effective is False,
+                "network_used": False,
+                "arbitrary_code_executed": False,
+            })
         if kind == "url-normalization-redaction":
             original = "http://user:s%7Eecret@example.invalid/objects.inv"
             unreserved = frozenset(
@@ -539,6 +574,8 @@ class RepositoryToolSuite:
                         "kind": {
                             "type": "string",
                             "enum": [
+                                "path-containment",
+                                "security-control-default",
                                 "url-normalization-redaction",
                                 "tri-state-boolean",
                                 "serialization-exclusion-update",

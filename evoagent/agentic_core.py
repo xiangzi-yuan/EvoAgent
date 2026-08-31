@@ -1019,9 +1019,9 @@ class ModeRouterReviewer(Reviewer):
                     },
                     read_skill_resource,
                 ))
-            initial_observations = (
-                self._repository_preflight(assignment, parsed, tools)
-                if suite.repository_available else []
+            initial_observations = self._repository_preflight(
+                assignment, parsed, tools,
+                repository_available=suite.repository_available,
             )
             return role.run(
                 json.dumps(context, ensure_ascii=False),
@@ -1066,7 +1066,9 @@ class ModeRouterReviewer(Reviewer):
                 self._save_lead_session(task_id, session, ledger)
 
     @staticmethod
-    def _repository_preflight(assignment, parsed, tools):
+    def _repository_preflight(
+        assignment, parsed, tools, repository_available=True,
+    ):
         """Prefetch risk-ranked source context before a worker's first model call."""
         files = set(assignment.get("files") or parsed.files)
         added = [item for item in parsed.added_lines if item.path in files]
@@ -1095,7 +1097,7 @@ class ModeRouterReviewer(Reviewer):
         }
         observations = []
         selected = added[0] if added else None
-        if selected and "read_file" in tools.names():
+        if repository_available and selected and "read_file" in tools.names():
             try:
                 value = tools.invoke("read_file", {
                     "path": selected.path,
@@ -1132,7 +1134,7 @@ class ModeRouterReviewer(Reviewer):
                 queries.append(query)
                 if len(queries) >= 2:
                     break
-        if "search_repository" in tools.names():
+        if repository_available and "search_repository" in tools.names():
             for query in queries:
                 try:
                     value = tools.invoke(
@@ -1149,6 +1151,12 @@ class ModeRouterReviewer(Reviewer):
                     })
         probe_kinds = []
         lowered = text.lower()
+        if any(token in lowered for token in ("filepath.join", "os.path.join")) and any(
+            token in lowered for token in ("repodir", "repository", "base", "path")
+        ):
+            probe_kinds.append("path-containment")
+        if "verify_signature" in lowered and "false" in lowered:
+            probe_kinds.append("security-control-default")
         if "replace(" in lowered and any(
             token in lowered for token in ("url", "location", "redirect")
         ):
@@ -1185,7 +1193,7 @@ class ModeRouterReviewer(Reviewer):
                         "step": 0, "tool": "semantic_probe", "ok": False,
                         "error": str(exc)[:1000],
                     })
-        if selected and "ast_analyze" in tools.names():
+        if repository_available and selected and "ast_analyze" in tools.names():
             try:
                 value = tools.invoke("ast_analyze", {"path": selected.path})
                 observations.append({
@@ -1441,12 +1449,12 @@ class ModeRouterReviewer(Reviewer):
                 reasons.append("Lead did not select the candidate")
             if critic_required and not critic.get("publication_ready"):
                 reasons.append("Critic did not complete all publication checks")
-            if not repository_available:
-                reasons.append("repository context is unavailable")
             repository_refs = repository_evidence_refs(finding)
+            claim_refs = claim_specific_high_risk_evidence_refs(finding)
+            if not repository_available and not claim_refs:
+                reasons.append("repository context is unavailable")
             if not repository_refs:
                 reasons.append("no repository-backed tool evidence")
-            claim_refs = claim_specific_high_risk_evidence_refs(finding)
             if (
                 finding.severity in {Severity.CRITICAL, Severity.HIGH}
                 and not claim_refs

@@ -72,6 +72,52 @@ class FindingPolicyTests(unittest.TestCase):
         self.assertEqual("suggestion", decisions[0]["disposition"])
         self.assertIn("repository context is unavailable", decisions[0]["reasons"])
 
+    def test_bounded_behavioral_probe_can_replace_repository_checkout(self):
+        candidate = finding(rule_id="CWE-22", severity=Severity.HIGH)
+        candidate.title = "Path traversal escapes repository containment"
+        candidate.evidence_refs = [{
+            "evidence_id": "semantic_probe:path-containment",
+            "tool": "semantic_probe",
+            "output": {
+                "kind": "path-containment",
+                "parent_segments_escape_base": True,
+                "arbitrary_code_executed": False,
+            },
+        }]
+
+        published, suggestions, decisions = ModeRouterReviewer._partition_publication(
+            [], [candidate], [candidate],
+            [{"finding_index": 0, "publication_ready": True}],
+            repository_available=False,
+        )
+
+        self.assertEqual([candidate], published)
+        self.assertEqual([], suggestions)
+        self.assertEqual("confirmed", decisions[0]["disposition"])
+
+    def test_unrelated_semantic_probe_cannot_publish_high_risk_claim(self):
+        candidate = finding(rule_id="CWE-347", severity=Severity.HIGH)
+        candidate.title = "JWT signature verification disabled"
+        candidate.evidence_refs = [{
+            "evidence_id": "semantic_probe:path-containment",
+            "tool": "semantic_probe",
+            "output": {
+                "kind": "path-containment",
+                "parent_segments_escape_base": True,
+                "arbitrary_code_executed": False,
+            },
+        }]
+
+        published, suggestions, decisions = ModeRouterReviewer._partition_publication(
+            [], [candidate], [candidate],
+            [{"finding_index": 0, "publication_ready": True}],
+            repository_available=False,
+        )
+
+        self.assertEqual([], published)
+        self.assertEqual([candidate], suggestions)
+        self.assertIn("repository context is unavailable", decisions[0]["reasons"])
+
     def test_repository_backed_lead_and_critic_approved_claim_is_publishable(self):
         candidate = finding()
         candidate.evidence_refs = [{

@@ -33,6 +33,10 @@ def main() -> None:
         help="Remove repository_root for a controlled Diff-only comparison.",
     )
     parser.add_argument(
+        "--repository-root", default="",
+        help="Use this checkout as repository context for the selected case.",
+    )
+    parser.add_argument(
         "--output",
         default=os.path.join(
             ROOT, "output", "agentic-evaluation", "single-case.json"
@@ -55,6 +59,12 @@ def main() -> None:
     if args.without_repository_context:
         case = dict(case)
         case.pop("repository_root", None)
+    if args.repository_root:
+        repository_root = os.path.abspath(args.repository_root)
+        if not os.path.isdir(repository_root):
+            parser.error("--repository-root must be an existing directory")
+        case = dict(case)
+        case["repository_root"] = repository_root
     for finding in case["expected_findings"]:
         finding.setdefault("should_comment", True)
 
