@@ -1,7 +1,13 @@
 {
   "schema_version": 1,
   "name": "obvious-stability-canary-v1",
-  "status": "passed",
+  "status": "superseded",
+  "superseded_by": "benchmarks/obvious_stability_canary_v2_baseline.json",
+  "validity": {
+    "risk_case": "valid: repository HEAD matched the regression's vulnerable new-file state",
+    "clean_case": "invalid context: the vulnerable base checkout was mounted instead of the fixed head",
+    "resolution": "the clean direction was rerun at the fixed head and remained silent in v2"
+  },
   "reviewed_commit": "df2111ac162c41c4aba07e08e943dacebe04a27c",
   "reviewed_at": "2026-08-31",
   "model": {
@@ -96,6 +102,7 @@
   "interpretation": [
     "The obvious sandbox-removal regression is now protected by a narrow deterministic cross-line guard; agents still provide contextual review around that baseline.",
     "Evaluation uses one worker pass per specialist, so a Lead revision request cannot multiply calls in the stability profile.",
+    "The v1 clean result is retained for audit but superseded because its repository checkout SHA did not match the Diff's fixed new-file state.",
     "This two-case canary proves one defect family and its clean inverse only; it is not a production accuracy estimate or proof that all obvious defects are detected."
   ]
 }

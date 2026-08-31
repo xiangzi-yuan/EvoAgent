@@ -1,0 +1,129 @@
+{
+  "schema_version": 1,
+  "name": "obvious-stability-canary-v2",
+  "status": "passed-diagnostic",
+  "implementation_commit": "b4203cdd946349d99a436bfbbffd747af6800062",
+  "reviewed_at": "2026-08-31",
+  "model": {
+    "provider": "deepseek",
+    "name": "deepseek-v4-flash",
+    "base_url": "https://api.deepseek.com"
+  },
+  "configuration": {
+    "roles": [
+      "lead",
+      "security",
+      "correctness-reliability",
+      "critic"
+    ],
+    "deterministic_rules": 18,
+    "max_revision_rounds": 0,
+    "publish_unverified_suggestions": false,
+    "token_budget_per_pr": 16000,
+    "time_budget_seconds_per_pr": 180,
+    "model_request_timeout_seconds": 90,
+    "repository_execution": false,
+    "network_or_exploit_execution": false,
+    "repository_sha_validation": true,
+    "docker_git_available": true
+  },
+  "exact_commit_deterministic_gate": {
+    "dataset": "benchmarks/obvious_severe_smoke_v2.jsonl",
+    "dataset_sha256": "246e553c0e35a6fb1e705104ce0ee6e6dc0c407e2dc37d00a0a87ce06498d46c",
+    "report": "output/stability-canary-v2/deterministic-18.json",
+    "report_sha256": "7ad80300796fb39424da8f44b23f8a1dc9e8a0207fa218132a13b426506b7c96",
+    "cases": 9,
+    "risk_cases": 5,
+    "clean_cases": 4,
+    "tp": 5,
+    "fp": 1,
+    "fn": 0,
+    "precision": 0.8333,
+    "recall": 1.0,
+    "f1": 0.9091,
+    "high_risk_recall": 1.0,
+    "clean_accuracy": 1.0,
+    "severity_accuracy": 0.8,
+    "extra_output": "one low-severity REL-DEBUG-PRINT on the already-vulnerable Microsoft PR"
+  },
+  "model_integrated_four_pairs": {
+    "dataset": "benchmarks/obvious_severe_smoke_v2.jsonl",
+    "selected_normalized_sha256": "ed40def249954c8deff0e9a40c7e46d6c809b53334653a382c0f1c46de0ccccc",
+    "report": "output/stability-canary-v2/four-pairs-final.json",
+    "report_sha256": "68a6f45dd713751d2da61d3de61dc83ca82e65d481f707c475950dea8b7049b3",
+    "execution_method": "cached-only merge of eight successful single-case reports",
+    "uniform_final_commit_execution": false,
+    "cases": 8,
+    "risk_cases": 4,
+    "clean_cases": 4,
+    "tp": 4,
+    "fp": 0,
+    "fn": 0,
+    "precision": 1.0,
+    "recall": 1.0,
+    "f1": 1.0,
+    "high_risk_recall": 1.0,
+    "clean_accuracy": 1.0,
+    "strict_clean_silence_rate": 1.0,
+    "evidence_accuracy": 1.0,
+    "exact_line_accuracy": 1.0,
+    "severity_accuracy": 1.0,
+    "execution_success_rate": 1.0,
+    "full_role_success_rate": 1.0,
+    "degraded_execution_rate": 0.0,
+    "suggestions": 0,
+    "worker_failures": 0,
+    "llm_calls": 45,
+    "total_tokens": 233948
+  },
+  "protected_families": [
+    {
+      "family": "JWT signature verification disabled by default",
+      "rule_id": "SEC-JWT-SIGNATURE-DISABLED",
+      "cwe": "CWE-347",
+      "risk": "required-hit",
+      "clean_fix": "silent"
+    },
+    {
+      "family": "safe repository path resolver replaced by filepath.Join",
+      "rule_id": "SEC-PATH-TRAVERSAL",
+      "cwe": "CWE-22",
+      "risk": "required-hit",
+      "clean_fix": "silent"
+    },
+    {
+      "family": "GitHub Actions expression interpolated directly in run",
+      "rule_id": "SEC-GHA-EXPRESSION-IN-SHELL",
+      "cwe": "CWE-78",
+      "risk": "required-hit",
+      "clean_fix": "silent"
+    },
+    {
+      "family": "Jinja sandbox replaced by unrestricted Environment",
+      "rule_id": "SEC-JINJA-UNSANDBOXED",
+      "cwe": "CWE-1336",
+      "risk": "required-hit",
+      "clean_fix": "silent"
+    }
+  ],
+  "invalid_runs_excluded": [
+    {
+      "case_id": "alibaba-open-code-review-issue-90-security-fix",
+      "report": "output/stability-canary-v2/alibaba-security-fix.json",
+      "report_sha256": "cc53d1c2d178923dcf84b699179b8fb535128447e1814edda17503614df2c3cc",
+      "reason": "the vulnerable base checkout was supplied for a Diff whose new-file state is the fixed head; its one formal Finding is not counted"
+    },
+    {
+      "case_id": "alibaba-open-code-review-issue-90-security-fix",
+      "report": "output/stability-canary-v2/should-not-run.json",
+      "report_sha256": "8d0c0a439937f817f9e6e9a0d6ab82612a856f81ef34e7ac38c04220a9f167e3",
+      "reason": "a Docker rebuild failure left the old runner active; the wrong-SHA execution is retained only as an audit artifact"
+    }
+  ],
+  "limitations": [
+    "This is a deliberately selected L0 smoke gate, not an unbiased production accuracy estimate.",
+    "Four risk cases are explicit reversals of public security fixes and are never represented as the original PR direction.",
+    "The model-integrated report combines compatible single-case checkpoints created during the incremental fix; it is not a uniform rerun of all eight records at the final commit.",
+    "The exact final commit is covered by all 120 local tests and the nine-record deterministic gate; a future release claim still requires a uniform repeated model run on a larger repository-isolated set."
+  ]
+}
