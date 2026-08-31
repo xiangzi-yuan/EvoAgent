@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "status": "confirmed",
+  "reviewer": "codex-manual-semantic-review",
+  "reviewed_at": "2026-08-31",
+  "reviewed_findings": 1,
+  "source_report": "output/python-security/deepseek-v4-flash-v1-unadjudicated.json",
+  "source_report_sha256": "612be0d54c89327b86cadf99cf424a8ed59c599074f60c2ef7764b3f8fac339d",
+  "cases": {
+    "python-gitpython-cve-2026-42215-regression": [
+      {
+        "path": "git/cmd.py",
+        "line": 959,
+        "rule_id": "CWE-697",
+        "severity": "high",
+        "verdict": "invalid",
+        "note": "Finding 以不存在或未证明适用的 --config-file 为例，并忽略 --config 前缀相关选项本身可能改变 Git 配置安全边界；没有仓库测试或 Git 文档证明合法调用被本次检查错误阻断，不能作为独立高危缺陷。"
+      }
+    ]
+  }
+}

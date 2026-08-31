@@ -141,6 +141,29 @@ class FindingPolicyTests(unittest.TestCase):
         self.assertEqual([], suggestions)
         self.assertEqual("confirmed", decisions[0]["disposition"])
 
+    def test_git_option_probe_supports_normalization_bypass_claim(self):
+        candidate = finding(rule_id="CWE-184", severity=Severity.HIGH)
+        candidate.title = "Unsafe upload_pack kwarg bypasses canonical option check"
+        candidate.evidence_refs = [{
+            "evidence_id": "semantic_probe:git-option-normalization",
+            "tool": "semantic_probe",
+            "output": {
+                "kind": "git-option-normalization",
+                "dangerous_flag_emitted_after_raw_check": True,
+                "arbitrary_code_executed": False,
+            },
+        }]
+
+        published, suggestions, decisions = ModeRouterReviewer._partition_publication(
+            [], [candidate], [candidate],
+            [{"finding_index": 0, "publication_ready": True}],
+            repository_available=False,
+        )
+
+        self.assertEqual([candidate], published)
+        self.assertEqual([], suggestions)
+        self.assertEqual("confirmed", decisions[0]["disposition"])
+
     def test_repository_backed_lead_and_critic_approved_claim_is_publishable(self):
         candidate = finding()
         candidate.evidence_refs = [{

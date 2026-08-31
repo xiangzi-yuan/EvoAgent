@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "status": "confirmed",
+  "reviewer": "codex-manual-semantic-review",
+  "reviewed_at": "2026-08-31",
+  "reviewed_suggestions": 1,
+  "source_report": "output/python-security/deepseek-v4-flash-v1-unadjudicated.json",
+  "source_report_sha256": "612be0d54c89327b86cadf99cf424a8ed59c599074f60c2ef7764b3f8fac339d",
+  "cases": {
+    "python-apache-airflow-cve-2026-59243-security-fix": [
+      {
+        "path": "providers/fab/src/airflow/providers/fab/auth_manager/security_manager/override.py",
+        "line": 2427,
+        "rule_id": "CWE-754",
+        "severity": "high",
+        "verdict": "invalid",
+        "note": "JWT 签名校验失败时拒绝登录是安全修复的 fail-closed 行为，不应回退到不验签；Finding 没有证明异常未被上层 OAuth 流程处理，也没有仓库兼容性证据。"
+      }
+    ]
+  }
+}

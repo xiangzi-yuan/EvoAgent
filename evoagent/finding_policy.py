@@ -177,6 +177,10 @@ def _semantic_probe_supports_finding(item: dict, finding: Finding) -> bool:
             "cwe-78", "cwe-94", "command injection", "shell", "github actions",
             "expression interpolation",
         ),
+        "git-option-normalization": (
+            "cwe-78", "cwe-184", "unsafe option", "upload_pack", "upload-pack",
+            "underscore", "canonical",
+        ),
         "url-normalization-redaction": (
             "url", "redact", "credential", "cwe-200", "cwe-522", "cwe-532",
         ),

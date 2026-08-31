@@ -215,6 +215,14 @@ python scripts/run_single_agentic_case.py benchmarks/obvious_severe_smoke.jsonl 
 
 为这批对照增加的能力仍是通用机制：`github-actions-expression-shell` 固定探针只比较表达式直接拼入命令与环境变量间接传递，不执行命令；预检会从高风险新增行追踪一个跨文件使用点和一跳调用者。Critic 和证据门禁没有放宽，Giskard Finding 必须拿到 `_inline_env.from_string(self.content_template)` 等仓库调用链证据后才能正式发布。
 
+### Python 安全漏洞配对集
+
+`benchmarks/python_security_pairs_v1.jsonl` 暂时把语言固定为 Python，包含 Airflow、Giskard Agents、django-haystack 和 GitPython 四组公开高危漏洞及其真实修复方向，共 4 条风险、4 条干净安全修复。风险 Diff 均由公开修复反向构造并显式标记，不冒充原始 PR 方向。
+
+DeepSeek V4 Flash 四角色结果为：4/4 漏洞命中，高风险 Recall 100%，证据准确率 100%；4/4 修复无正式误报，严格干净静默率 75%。原始 Precision 80%、Recall 100%、F1 88.89%。唯一额外正式 Finding 和唯一建议经人工复核后均为 invalid。14 条规则只命中 django-haystack 的直接 `eval()`，风险召回率 25%，其余三条依赖安全默认值、模板调用链或参数规范化顺序。机器可读基线见 `benchmarks/python_security_pairs_v1_baseline.json`，最终报告见 `output/python-security/deepseek-v4-flash-v1-final.json`。
+
+GitPython 案例使用固定的 `git-option-normalization` 探针对比 `upload_pack` 在安全检查前后的名称，证明原始名称未命中黑名单、后续却会发出 `--upload-pack`。探针不调用 Git、不执行 helper、不访问网络。首个 Haystack 模型请求曾返回一次畸形 JSON，重试成功；因此后续仍需加强模型输出格式自动修复，不能只报告最终成功率。
+
 项目启动时会自动读取项目根目录的 `.env`，也兼容 `evoagent/.env`；系统环境变量优先于 `.env` 文件。推荐将以下内容写入根目录 `.env`（该文件已被 `.gitignore` 忽略）：
 
 ```env

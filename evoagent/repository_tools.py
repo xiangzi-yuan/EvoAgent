@@ -316,6 +316,30 @@ class RepositoryToolSuite:
                 "network_used": False,
                 "arbitrary_code_executed": False,
             })
+        if kind == "git-option-normalization":
+            supplied_kwarg = "upload_pack"
+            unsafe_option = "--upload-pack"
+            raw_name = supplied_kwarg.lstrip("-").split("=", 1)[0]
+            canonical_name = raw_name.replace("_", "-")
+            unsafe_name = unsafe_option.lstrip("-").split("=", 1)[0]
+            emitted_flag = "--%s=/tmp/helper" % canonical_name
+            return _evidence("semantic_probe", {
+                "kind": kind,
+                "operation": "compare-raw-kwarg-check-with-emitted-git-option",
+                "supplied_kwarg": supplied_kwarg,
+                "unsafe_option": unsafe_option,
+                "raw_name": raw_name,
+                "canonical_name": canonical_name,
+                "raw_check_blocks": raw_name == unsafe_name,
+                "canonical_check_blocks": canonical_name == unsafe_name,
+                "emitted_flag": emitted_flag,
+                "dangerous_flag_emitted_after_raw_check": (
+                    raw_name != unsafe_name
+                    and emitted_flag.startswith(unsafe_option + "=")
+                ),
+                "network_used": False,
+                "arbitrary_code_executed": False,
+            })
         if kind == "url-normalization-redaction":
             original = "http://user:s%7Eecret@example.invalid/objects.inv"
             unreserved = frozenset(
@@ -601,6 +625,7 @@ class RepositoryToolSuite:
                                 "path-containment",
                                 "security-control-default",
                                 "github-actions-expression-shell",
+                                "git-option-normalization",
                                 "url-normalization-redaction",
                                 "tri-state-boolean",
                                 "serialization-exclusion-update",

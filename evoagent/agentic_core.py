@@ -1215,6 +1215,12 @@ class ModeRouterReviewer(Reviewer):
             and "${{" in lowered
         ):
             probe_kinds.append("github-actions-expression-shell")
+        if (
+            "unsafe_options" in lowered
+            and "bare_unsafe_options" in lowered
+            and "startswith" in lowered
+        ):
+            probe_kinds.append("git-option-normalization")
         if "replace(" in lowered and any(
             token in lowered for token in ("url", "location", "redirect")
         ):

@@ -1,0 +1,96 @@
+{
+  "schema_version": 1,
+  "name": "python-security-pairs-v1",
+  "purpose": "Python-only paired diagnostic for severe public vulnerabilities and their real security-fix directions",
+  "dataset": {
+    "path": "benchmarks/python_security_pairs_v1.jsonl",
+    "sha256": "666511b7dae45938770c5264a41ef90c3a7355e4dbd6529685a53072664247c1",
+    "cases": 8,
+    "repositories": 4,
+    "risk_cases": 4,
+    "clean_security_fix_cases": 4,
+    "languages": ["python"],
+    "production_readiness_claimed": false,
+    "limitations": [
+      "This small selected paired set is a language-specific diagnostic, not an unbiased production estimate.",
+      "Every risk case is a transparent reversal of a public security fix and is not represented as the original PR direction.",
+      "Risk and clean directions intentionally share repositories, so this set is not repository-isolated across splits.",
+      "The final report contains successful cases only; one discarded Haystack attempt received malformed model JSON before succeeding on retry."
+    ]
+  },
+  "sources": [
+    {
+      "repository": "apache/airflow",
+      "advisory": "https://github.com/advisories/GHSA-q5r3-w69r-hrfw",
+      "defect": "JWT signature verification disabled by default",
+      "cwe": "CWE-347"
+    },
+    {
+      "repository": "Giskard-AI/giskard-oss",
+      "advisory": "https://github.com/advisories/GHSA-frv4-x25r-588m",
+      "defect": "Untrusted Jinja templates rendered outside SandboxedEnvironment",
+      "cwe": "CWE-1336"
+    },
+    {
+      "repository": "django-haystack/django-haystack",
+      "advisory": "https://github.com/advisories/GHSA-r3hx-x5rh-p9vv",
+      "defect": "Elasticsearch result value passed to eval",
+      "cwe": "CWE-95"
+    },
+    {
+      "repository": "gitpython-developers/GitPython",
+      "advisory": "https://github.com/advisories/GHSA-rpm5-65cw-6hj4",
+      "defect": "Unsafe Git option validation occurs before underscore-to-dash normalization",
+      "cwe": "CWE-78"
+    }
+  ],
+  "model": {
+    "provider": "deepseek",
+    "name": "deepseek-v4-flash"
+  },
+  "deterministic_14_rule": {
+    "report": "output/python-security/deterministic-14-rule-v1.json",
+    "tp": 1,
+    "fp": 0,
+    "fn": 3,
+    "precision": 1.0,
+    "recall": 0.25,
+    "f1": 0.4,
+    "high_risk_recall": 0.25,
+    "clean_accuracy": 1.0
+  },
+  "agentic_result": {
+    "report": "output/python-security/deepseek-v4-flash-v1-final.json",
+    "report_sha256": "5c5d69129e174c959343aeb4cffc014db0f79d29678885dc7dd6e95cf86a6246",
+    "execution_success_rate": 1.0,
+    "required_tp": 4,
+    "raw_fp": 1,
+    "required_fn": 0,
+    "raw_precision": 0.8,
+    "required_recall": 1.0,
+    "raw_f1": 0.8889,
+    "high_risk_recall": 1.0,
+    "evidence_accuracy": 1.0,
+    "exact_line_accuracy": 0.75,
+    "severity_accuracy": 0.75,
+    "clean_accuracy": 1.0,
+    "strict_clean_silence_rate": 0.75,
+    "formal_adjudication_coverage": 1.0,
+    "formal_invalid_findings": 1,
+    "formal_nuisance_rate": 0.2,
+    "suggestions": 1,
+    "suggestion_adjudication_coverage": 1.0,
+    "suggestion_invalid": 1,
+    "suggestion_nuisance_rate": 1.0,
+    "llm_calls": 78,
+    "total_tokens": 414902,
+    "average_latency_ms_per_pr": 32128.25,
+    "discarded_retryable_model_format_failures": 1
+  },
+  "adjudication": {
+    "formal": "benchmarks/adjudications/python-security-v1-formal.confirmed.json",
+    "suggestions": "benchmarks/adjudications/python-security-v1-suggestions.confirmed.json",
+    "reviewer": "codex-manual-semantic-review",
+    "status": "confirmed"
+  }
+}

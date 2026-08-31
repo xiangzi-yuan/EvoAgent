@@ -280,6 +280,9 @@ class AgenticEvaluationTests(unittest.TestCase):
         workflow_expression = RepositoryToolSuite.semantic_probe(
             "github-actions-expression-shell"
         )["output"]
+        git_option = RepositoryToolSuite.semantic_probe(
+            "git-option-normalization"
+        )["output"]
 
         self.assertTrue(serialization["excluded_field_update_lost"])
         self.assertTrue(equality["contract_violated"])
@@ -300,13 +303,47 @@ class AgenticEvaluationTests(unittest.TestCase):
                 "environment_reference_keeps_value_out_of_command_text"
             ]
         )
+        self.assertFalse(git_option["raw_check_blocks"])
+        self.assertTrue(git_option["canonical_check_blocks"])
+        self.assertTrue(git_option["dangerous_flag_emitted_after_raw_check"])
         self.assertTrue(all(
             item["arbitrary_code_executed"] is False
             for item in (
                 serialization, equality, decorators, cycle, alias, path,
-                security_default, workflow_expression,
+                security_default, workflow_expression, git_option,
             )
         ))
+
+    def test_git_option_preflight_runs_fixed_normalization_probe(self):
+        class RecordingTools:
+            def __init__(self):
+                self.calls = []
+
+            def names(self):
+                return ["semantic_probe"]
+
+            def invoke(self, name, arguments):
+                self.calls.append((name, dict(arguments)))
+                return RepositoryToolSuite.semantic_probe(arguments["kind"])
+
+        parsed = parse_unified_diff(
+            "--- a/git/cmd.py\n+++ b/git/cmd.py\n"
+            "@@ -950,2 +950,3 @@\n"
+            "+bare_unsafe_options = [item.lstrip('-') for item in unsafe_options]\n"
+            "+if option.startswith(unsafe_option):\n"
+            "+    raise UnsafeOptionError()\n"
+        )
+        tools = RecordingTools()
+
+        observations = ModeRouterReviewer._repository_preflight(
+            {"files": parsed.files}, parsed, tools, repository_available=False,
+        )
+
+        self.assertEqual(
+            [("semantic_probe", {"kind": "git-option-normalization"})],
+            tools.calls,
+        )
+        self.assertTrue(observations[0]["ok"])
 
     def test_expected_finding_can_declare_review_taxonomy_aliases(self):
         finding = Finding(
