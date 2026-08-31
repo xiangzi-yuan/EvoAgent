@@ -87,6 +87,14 @@ def build_case(
             "checkout HEAD %s does not match snapshot %s" % (actual_head, snapshot_sha)
         )
     git_output(repository_root, ["cat-file", "-e", base_sha + "^{commit}"])
+    effective_base_sha = git_output(
+        repository_root, ["merge-base", base_sha, snapshot_sha]
+    ).strip().lower()
+    if not effective_base_sha:
+        raise ValueError(
+            "base %s and snapshot %s do not have a merge base"
+            % (base_sha, snapshot_sha)
+        )
 
     evidence = {}
     for expected in item["expected_findings"]:
@@ -133,7 +141,10 @@ def build_case(
 
     diff = git_output(
         repository_root,
-        ["diff", "--no-ext-diff", "--unified=3", base_sha, snapshot_sha, "--"],
+        [
+            "diff", "--no-ext-diff", "--unified=3",
+            effective_base_sha, snapshot_sha, "--",
+        ],
     )
     expected_findings = []
     for raw in item["expected_findings"]:
@@ -152,7 +163,9 @@ def build_case(
             "label_kind": "public-github-review-comment",
             "label_completeness": "targeted-review-comments",
             "public_url": "https://github.com/%s/pull/%d" % (repository, pull_request),
-            "base_sha": base_sha,
+            "base_sha": effective_base_sha,
+            "requested_base_sha": base_sha,
+            "base_was_merge_base": effective_base_sha == base_sha,
             "head_sha": snapshot_sha,
             "review_evidence": list(evidence.values()),
         },

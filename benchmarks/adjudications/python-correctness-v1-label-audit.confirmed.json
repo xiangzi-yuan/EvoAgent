@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "status": "confirmed",
+  "reviewer": "codex-manual-semantic-review",
+  "reviewed_at": "2026-08-31",
+  "case_id": "pydantic-pr-13717-f2cb3992",
+  "review_comment_id": 3870567067,
+  "public_url": "https://github.com/pydantic/pydantic/pull/13717#discussion_r3870567067",
+  "previous_label": "LOGIC-VALIDATION-ALIAS-CONDITION",
+  "verdict": "invalid-as-defect-label",
+  "action": "converted-to-clean-control",
+  "reason": "The trusted review comment contains only a code-style suggestion changing `is False` to `not`; it does not claim a behavioral defect. Repository evidence shows ConfigWrapper supplies and normalizes a boolean value before this path, and the PR author later documented that the two forms are equivalent here."
+}

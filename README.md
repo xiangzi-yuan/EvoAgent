@@ -229,6 +229,14 @@ DeepSeek V4 Flash 四角色结果为：4/4 漏洞命中，高风险 Recall 100%�
 
 GitPython 案例使用固定的 `git-option-normalization` 探针对比 `upload_pack` 在安全检查前后的名称，证明原始名称未命中黑名单、后续却会发出 `--upload-pack`。探针不调用 Git、不执行 helper、不访问网络。首个 Haystack 模型请求曾返回一次畸形 JSON，重试成功；因此后续仍需加强模型输出格式自动修复，不能只报告最终成功率。
 
+### 统一 10 案例家族回归
+
+提交 `7a78eb2` 使用同一 DeepSeek V4 Flash 配置复跑了 6 个普通 Python PR 和 4 组安全案例。安全案例包含风险回放与干净修复两个方向，因此一共执行 14 条评测记录。完整机器可读结论见 `benchmarks/uniform_10_family_deepseek_v4_flash_7a78eb2_baseline.json`。
+
+普通组经数据审计后包含 5 个真实缺陷和 1 个干净对照：TP=2、FP=2、FN=3，Precision 50%、Recall 40%、F1 44.44%，干净对照保持静默。导入器原先会在 GitHub 当前 base 不是旧 PR head 祖先时混入历史差异；现在统一使用 git merge-base，Rich 因此从受污染的 27 文件 Diff 恢复为真实 4 文件 PR，并准确命中 `__ne__` 缺陷。Pydantic 的旧标签仅来自风格建议且被仓库证据反驳，已改为干净对照。
+
+安全组严格自动指标为 Precision/Recall/F1 均 50%；人工语义复核后为 75%/75%/75%。Airflow、Haystack 和 GitPython 的目标语义被正式输出，Giskard 被 Security Reviewer 识别但因 Diff-only 数据没有仓库调用链证据而被 Critic/Gate 拒绝。四个真实修复方向继续 4/4 无正式误报，严格干净静默率由旧基线 75% 提高到 100%。这说明收紧证据门禁减少了噪声，但当前 Diff-only 安全评测出现了真实发布召回回退，不能继续沿用旧的 4/4 结论。
+
 项目启动时会自动读取项目根目录的 `.env`，也兼容 `evoagent/.env`；系统环境变量优先于 `.env` 文件。推荐将以下内容写入根目录 `.env`（该文件已被 `.gitignore` 忽略）：
 
 ```env

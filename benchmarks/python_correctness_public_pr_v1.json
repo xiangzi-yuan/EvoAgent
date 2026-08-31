@@ -44,7 +44,7 @@
     },
     {
       "id": "pydantic-pr-13717-f2cb3992",
-      "category": "tri-state alias configuration",
+      "category": "tri-state alias configuration clean control",
       "public_url": "https://github.com/pydantic/pydantic/pull/13717"
     },
     {

@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "status": "confirmed",
+  "reviewer": "codex-manual-semantic-review",
+  "reviewed_at": "2026-08-31",
+  "source_report": "output/python-correctness/uniform-7a78eb2-v5-raw.json",
+  "source_report_sha256": "6d982efaf62b5acc2ba235bbe598e741423867ec8cd53f045ae2fed1e267e71c",
+  "cases": {
+    "pallets-werkzeug-pr-2888-15b92ecd": [
+      {
+        "path": "src/werkzeug/datastructures/structures.py",
+        "line": 111,
+        "rule_id": "CWE-703",
+        "severity": "medium",
+        "verdict": "optional",
+        "note": "Finding correctly notes that the docstring does not explain the implicit None return, but it explicitly calls the implementation correct and therefore does not recover the labelled swallowed-conversion-error defect at lines 129-130."
+      }
+    ],
+    "python-mypy-pr-21811-062f4a68": [
+      {
+        "path": "mypyc/lib-rt/function_wrapper.c",
+        "line": 155,
+        "rule_id": "CWE-476",
+        "severity": "medium",
+        "verdict": "invalid",
+        "note": "The branch passes the non-null typ value to PyMethod_New(func, typ); it does not pass the null self value claimed by the Finding, so the asserted null dereference is unsupported."
+      }
+    ]
+  }
+}

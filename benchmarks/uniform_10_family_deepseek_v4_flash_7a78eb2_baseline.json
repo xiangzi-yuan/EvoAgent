@@ -1,0 +1,138 @@
+{
+  "schema_version": 1,
+  "name": "uniform-10-family-deepseek-v4-flash-7a78eb2",
+  "status": "completed",
+  "reviewed_commit": "7a78eb2",
+  "reviewed_at": "2026-08-31",
+  "model": {
+    "provider": "deepseek",
+    "name": "deepseek-v4-flash",
+    "base_url": "https://api.deepseek.com"
+  },
+  "configuration": {
+    "roles": [
+      "lead",
+      "security",
+      "correctness-reliability",
+      "critic"
+    ],
+    "token_budget_per_pr": 16000,
+    "time_budget_seconds_per_pr": 180,
+    "model_request_timeout_seconds": 60,
+    "repository_execution": false,
+    "network_or_exploit_execution": false
+  },
+  "scope": {
+    "case_families": 10,
+    "evaluation_records": 14,
+    "ordinary_python_prs": 6,
+    "security_families": 4,
+    "security_risk_directions": 4,
+    "security_clean_fix_directions": 4
+  },
+  "ordinary_correctness": {
+    "dataset": "output/real-pr-reviewed-10-targeted-v5.jsonl",
+    "dataset_sha256": "b7ab2b78e0ce7b94e879f866dacceb5c3497c20e58c24b51d5522e136a72e6f4",
+    "report": "output/python-correctness/uniform-7a78eb2-v5-raw.json",
+    "report_sha256": "6d982efaf62b5acc2ba235bbe598e741423867ec8cd53f045ae2fed1e267e71c",
+    "adjudicated_report": "output/python-correctness/uniform-7a78eb2-v5-final.json",
+    "adjudicated_report_sha256": "b9d9d68e696c527b1f3eb133207c43e3c83e86235419845654f931354b37f1dc",
+    "risk_cases": 5,
+    "clean_cases": 1,
+    "tp": 2,
+    "fp": 2,
+    "fn": 3,
+    "precision": 0.5,
+    "recall": 0.4,
+    "f1": 0.4444,
+    "clean_accuracy": 1.0,
+    "strict_clean_silence_rate": 1.0,
+    "evidence_accuracy": 1.0,
+    "exact_line_accuracy": 1.0,
+    "severity_accuracy": 0.0,
+    "execution_success_rate": 1.0,
+    "full_role_success_rate": 0.8333,
+    "degraded_execution_rate": 0.1667,
+    "total_tokens": 514061,
+    "case_outcomes": {
+      "pallets-flask-pr-5044-a53835a3": "missed: external Werkzeug nullability contract was not established",
+      "pallets-werkzeug-pr-2888-15b92ecd": "missed target; published an optional documentation issue instead",
+      "textualize-rich-pr-2922-66226402": "formal target hit after merge-base dataset repair",
+      "pallets-click-pr-3695-7a0a3447": "missed: direct submodule import bypass was not traced",
+      "pydantic-pr-13717-f2cb3992": "clean control; correctly refuted the former false defect label, with one unrelated worker budget failure",
+      "python-mypy-pr-21811-062f4a68": "formal target hit after accepting CWE-670; one additional null-dereference Finding was invalid"
+    },
+    "data_repairs": [
+      "Rich and Werkzeug used a current GitHub base that was not an ancestor of the review snapshot; importer now diffs the git merge-base.",
+      "The former Pydantic target was a style-only review suggestion and is now a clean control.",
+      "CWE-670 is accepted for the mypy decorator-order control-flow defect."
+    ]
+  },
+  "security": {
+    "dataset": "benchmarks/python_security_pairs_v1.jsonl",
+    "dataset_sha256": "666511b7dae45938770c5264a41ef90c3a7355e4dbd6529685a53072664247c1",
+    "report": "output/python-security/uniform-7a78eb2-raw.json",
+    "report_sha256": "5ba41f23e3a318e402654bac768b266557124a6e6a92b19823bd0de2346393ba",
+    "previous_report": "output/python-security/deepseek-v4-flash-v1-final.json",
+    "previous_report_sha256": "5c5d69129e174c959343aeb4cffc014db0f79d29678885dc7dd6e95cf86a6246",
+    "strict_automatic": {
+      "tp": 2,
+      "fp": 2,
+      "fn": 2,
+      "precision": 0.5,
+      "recall": 0.5,
+      "f1": 0.5,
+      "high_risk_recall": 0.5,
+      "clean_accuracy": 1.0,
+      "strict_clean_silence_rate": 1.0,
+      "evidence_accuracy": 1.0,
+      "exact_line_accuracy": 1.0,
+      "severity_accuracy": 0.5
+    },
+    "manual_semantic": {
+      "target_hits": 3,
+      "target_misses": 1,
+      "valid_formal_findings": 3,
+      "invalid_formal_findings": 1,
+      "precision": 0.75,
+      "recall": 0.75,
+      "f1": 0.75,
+      "evidence_accuracy": 1.0,
+      "strict_exact_line_accuracy": 0.6667,
+      "severity_accuracy": 0.3333,
+      "pre_publication_candidate_target_detection": 1.0,
+      "notes": [
+        "GitPython semantically found the target as CWE-88 but anchored the Finding at line 954 instead of the labelled causal line 959, so strict automatic matching correctly did not count it.",
+        "The second GitPython prefix false-positive Finding lacked evidence that the example was a valid Git option and was manually judged invalid.",
+        "Giskard was recognized by the security worker in the primary run but rejected by Critic and the publication gate because this diff-only security dataset supplied no repository context proving an untrusted template source."
+      ]
+    },
+    "regression_retries": {
+      "giskard": {
+        "runs": 4,
+        "time_budgets_seconds": [180, 180, 180, 120],
+        "formal_target_hits": 0,
+        "conclusion": "stable final-publication regression, not a one-off timeout"
+      },
+      "gitpython": {
+        "runs": 3,
+        "time_budgets_seconds": [180, 180, 180],
+        "semantic_target_hits": 2,
+        "conclusion": "target detection is stochastic and taxonomy/location output is unstable"
+      }
+    },
+    "comparison_to_previous": {
+      "previous_semantic_high_risk_recall": 1.0,
+      "current_semantic_high_risk_recall": 0.75,
+      "previous_strict_clean_silence_rate": 0.75,
+      "current_strict_clean_silence_rate": 1.0,
+      "conclusion": "the stricter evidence gate reduced nuisance output but also suppressed one true Giskard security Finding"
+    }
+  },
+  "limitations": [
+    "This is a small selected diagnostic and not a production accuracy estimate.",
+    "LLM outputs remain stochastic; changed security cases were repeated and every run is reported.",
+    "The primary security dataset is Diff-only, while real deployment is intended to provide repository context.",
+    "Raw automatic metrics and manual semantic metrics are kept separate."
+  ]
+}

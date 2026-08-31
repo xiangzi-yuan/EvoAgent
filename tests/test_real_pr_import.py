@@ -29,6 +29,7 @@ class RealPrImportTests(unittest.TestCase):
     def test_review_dataset_is_bound_to_trusted_comment_snapshot(self, git, fetch):
         git.side_effect = lambda _root, args: (
             "head123\n" if args[:2] == ["rev-parse", "HEAD"] else
+            "base123\n" if args[0] == "merge-base" else
             "diff --git a/app.py b/app.py\n--- a/app.py\n+++ b/app.py\n"
             "@@ -1 +1 @@\n-old\n+new\n" if args[0] == "diff" else ""
         )
@@ -61,6 +62,42 @@ class RealPrImportTests(unittest.TestCase):
         )
         self.assertEqual("MEMBER", case["source"]["review_evidence"][0]["author_association"])
         self.assertEqual("head123", case["source"]["head_sha"])
+        self.assertEqual("base123", case["source"]["base_sha"])
+        self.assertTrue(case["source"]["base_was_merge_base"])
+
+    @mock.patch("scripts.import_github_review_dataset.git_output")
+    def test_review_dataset_uses_merge_base_for_non_ancestor_base(self, git):
+        git.side_effect = lambda _root, args: (
+            "head123\n" if args[:2] == ["rev-parse", "HEAD"] else
+            "merge123\n" if args[0] == "merge-base" else
+            "diff --git a/app.py b/app.py\n--- a/app.py\n+++ b/app.py\n"
+            "@@ -1 +1 @@\n-old\n+new\n" if args[0] == "diff" else ""
+        )
+        item = {
+            "id": "real-1", "repository": "org/repo", "pull_request": 7,
+            "split": "validation", "base_sha": "newerbase",
+            "snapshot_sha": "head123", "checkout": "repo-head123",
+            "expected_findings": [{
+                "review_comment_id": 11, "rule_id": "LOGIC-1",
+                "cwe": "CWE-670", "severity": "medium", "path": "app.py",
+                "start_line": 1, "end_line": 1, "should_comment": True,
+            }],
+        }
+        comment = {
+            "author_association": "MEMBER", "body": "Behavior regression.",
+            "html_url": "https://github.com/org/repo/pull/7#discussion_r11",
+            "original_commit_id": "head123", "original_line": 1,
+            "path": "app.py",
+            "pull_request_url": "https://api.github.com/repos/org/repo/pulls/7",
+        }
+        with tempfile.TemporaryDirectory() as root:
+            os.mkdir(os.path.join(root, "repo-head123"))
+            case = build_case(item, root, cached_comments={11: comment})
+        self.assertEqual("merge123", case["source"]["base_sha"])
+        self.assertEqual("newerbase", case["source"]["requested_base_sha"])
+        self.assertFalse(case["source"]["base_was_merge_base"])
+        diff_call = next(call for call in git.call_args_list if call.args[1][0] == "diff")
+        self.assertIn("merge123", diff_call.args[1])
 
     @mock.patch("scripts.import_github_review_dataset.fetch_review_comment")
     @mock.patch("scripts.import_github_review_dataset.git_output")
