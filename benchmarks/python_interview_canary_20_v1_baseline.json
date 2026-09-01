@@ -1,0 +1,96 @@
+{
+  "schema_version": 1,
+  "name": "python-interview-canary-20-v1",
+  "status": "passed-development-checkpoint",
+  "implementation_commit": "d7d092e294fc77f07651d691bf7a833b1893fdf1",
+  "reviewed_at": "2026-09-01",
+  "purpose": "Selected Python PR gate for obvious security and correctness regressions plus their clean public-fix directions",
+  "dataset": {
+    "path": "benchmarks/python_interview_canary_20_v1.jsonl",
+    "sha256": "d992dd98986513a8898425daebc9331b08f48aa042c612f519971ddcf1cd2ce9",
+    "cases": 20,
+    "families": 10,
+    "repositories": 10,
+    "risk_cases": 10,
+    "clean_fix_cases": 10,
+    "languages": ["python"]
+  },
+  "model": {
+    "provider": "deepseek",
+    "name": "deepseek-v4-flash",
+    "base_url": "https://api.deepseek.com"
+  },
+  "stable_profile": {
+    "roles": ["lead", "security", "correctness-reliability", "critic"],
+    "agent_token_budget_per_role": 16000,
+    "batch_token_budget_per_pr": 64000,
+    "max_revision_rounds": 0,
+    "publish_unverified_suggestions": false,
+    "minimum_model_finding_confidence": 0.8,
+    "low_severity_model_findings_are_advisory": true,
+    "repository_execution": false,
+    "network_or_exploit_execution": false
+  },
+  "deterministic_18_rule": {
+    "report": "output/python-interview-canary-20-v1/deterministic-18-current.json",
+    "report_sha256": "d29318950c23fda9fa9ef156c3ad2e04f006a75ade1dfa709d75d43a31daf375",
+    "cases": 20,
+    "tp": 3,
+    "fp": 0,
+    "fn": 7,
+    "precision": 1.0,
+    "recall": 0.3,
+    "f1": 0.4615,
+    "clean_accuracy": 1.0
+  },
+  "agentic_checkpoint": {
+    "report": "output/python-interview-canary-20-v1/agentic/combined-20-stable-v2.json",
+    "report_sha256": "9dd3970ce206b1a52b88080f6750e0c05dcada7cbc7eecc4d1c361985049c337",
+    "execution_method": "cached-only merge of successful case reports plus policy and evidence replays",
+    "uniform_final_commit_execution": false,
+    "mixed_execution_configuration": true,
+    "cases": 20,
+    "risk_cases": 10,
+    "clean_cases": 10,
+    "tp": 10,
+    "fp": 0,
+    "fn": 0,
+    "precision": 1.0,
+    "recall": 1.0,
+    "f1": 1.0,
+    "high_risk_recall": 1.0,
+    "clean_accuracy": 1.0,
+    "strict_clean_silence_rate": 1.0,
+    "evidence_accuracy": 1.0,
+    "exact_line_accuracy": 0.9,
+    "severity_accuracy": 0.7,
+    "execution_success_rate": 1.0,
+    "full_role_success_rate": 1.0,
+    "degraded_execution_rate": 0.0,
+    "llm_calls": 152,
+    "total_tokens": 888144
+  },
+  "budget_recheck": {
+    "report": "output/python-interview-canary-20-v1/agentic/stability-recheck-2-64k.json",
+    "report_sha256": "0094ee2cd39777fcd02e30a81a40327fd79cae8411c6382cf2c855c714ce957f",
+    "cases": [
+      "python-sqlmodel-997-mutating-update-dict-regression",
+      "python-requests-7205-empty-netrc-credentials-fix"
+    ],
+    "token_budget_per_pr": 64000,
+    "tp": 1,
+    "fp": 0,
+    "fn": 0,
+    "execution_success_rate": 1.0,
+    "full_role_success_rate": 1.0,
+    "degraded_execution_rate": 0.0,
+    "conclusion": "The earlier worker failures were reproduced as undersized per-role budgets and disappeared at the stable profile budget."
+  },
+  "limitations": [
+    "This is a deliberately selected obvious-defect canary, not an unbiased estimate of production PR-review accuracy.",
+    "The four security risk records transparently reverse public security fixes; the six correctness risk records transparently reverse public bug fixes.",
+    "The 20-case agentic checkpoint combines compatible cached executions created during incremental development and therefore is not a uniform run of all records at the final commit.",
+    "The current implementation commit is covered by 134 local tests and the exact 20-case deterministic run; a release-level claim still requires repeated uniform model runs from this commit.",
+    "Severity classification remains weaker than defect detection: 70% of matched findings used the labelled severity, while all required defects were still found."
+  ]
+}

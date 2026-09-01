@@ -235,6 +235,14 @@ DeepSeek V4 Flash 四角色结果为：4/4 漏洞命中，高风险 Recall 100%�
 
 GitPython 案例使用固定的 `git-option-normalization` 探针对比 `upload_pack` 在安全检查前后的名称，证明原始名称未命中黑名单、后续却会发出 `--upload-pack`。探针不调用 Git、不执行 helper、不访问网络。首个 Haystack 模型请求曾返回一次畸形 JSON，重试成功；因此后续仍需加强模型输出格式自动修复，不能只报告最终成功率。
 
+### Python 面试稳定性 20 条门禁
+
+`benchmarks/python_interview_canary_20_v1.jsonl` 把目标收窄为“明显主缺陷必须发现、对应修复不能误报”：10 个 Python PR 家族各有一条缺陷回放和一条公开修复方向，共 20 条。除四组安全案例外，普通正确性案例覆盖迭代时修改字典、目录消失异常、空 netrc 凭据、Decimal 特殊值、不可哈希异常和异常清理遗漏。
+
+当前开发检查点合并已有模型证据后为 TP=10、FP=0、FN=0，10/10 修复方向保持正式静默，证据准确率 100%，精确行准确率 90%，严重等级准确率 70%。18 条本地规则只命中 3/10 缺陷，说明这批结果主要依赖 Agent 仓库语义、固定探针和证据门禁，并非简单正则记忆。
+
+该模型报告是增量开发期间成功单例与无模型 Gate 重放的缓存合并，不是最终提交上的统一 20 条重跑，因此只能称为开发门禁检查点，不能当作生产准确率。完整限制、哈希和预算复测见 `benchmarks/python_interview_canary_20_v1_baseline.json`。后续发布前应从同一 commit、相同 64000/PR 预算至少统一重跑两轮，并单独报告重复命中率。
+
 ### 统一 10 案例家族回归
 
 提交 `7a78eb2` 使用同一 DeepSeek V4 Flash 配置复跑了 6 个普通 Python PR 和 4 组安全案例。安全案例包含风险回放与干净修复两个方向，因此一共执行 14 条评测记录。完整机器可读结论见 `benchmarks/uniform_10_family_deepseek_v4_flash_7a78eb2_baseline.json`。
