@@ -1,4 +1,6 @@
-# EvoAgent PR Reviewer
+# PRVolve
+
+自进化 Agent Runtime Harness 的 PR 审查与修复智能体。
 
 - 审查统一 diff，输出结构化问题、修复建议和测试建议
 - GitHub `pull_request` webhook（`opened`、`reopened`、`synchronize`）
@@ -38,7 +40,7 @@ $env:EVOAGENT_BOOTSTRAP_ADMIN_PASSWORD = '<替换为至少 10 个字符的密码
 python -m evoagent
 ```
 
-不要直接使用示例占位符作为密码或密钥。环境变量只对当前 PowerShell 及其子进程生效；修改配置后需要停止并重新启动 EvoAgent。服务可以在未配置模型时启动并提供健康检查，但提交审查前必须按下方“模型配置”章节配置模型。
+不要直接使用示例占位符作为密码或密钥。环境变量只对当前 PowerShell 及其子进程生效；修改配置后需要停止并重新启动 PRVolve。服务可以在未配置模型时启动并提供健康检查，但提交审查前必须按下方“模型配置”章节配置模型。
 
 Bootstrap 管理员只在用户名尚不存在时创建；已有同名用户的密码不会在重启时被覆盖。
 
@@ -286,10 +288,10 @@ https://<公网域名>/webhooks/github
 http://127.0.0.1:8080/webhooks/github
         │
         ▼
-EvoAgent 创建异步审查任务
+PRVolve 创建异步审查任务
 ```
 
-### 1. 配置 EvoAgent
+### 1. 配置 PRVolve
 
 先生成一个 Webhook Secret，并根据需要配置 GitHub fine-grained personal access token：
 
@@ -315,7 +317,7 @@ fine-grained PAT 只授权需要接入的仓库，并按功能授予最小权限
 - 回写审查评论：`Pull requests: Read and write`；
 - 创建自动修复分支和提交：`Contents: Read and write`、`Pull requests: Read and write`。
 
-只接收 Webhook 但不访问私有仓库、不回写评论且不执行自动修复时，可以不设置 PAT。密钥必须在启动 EvoAgent 前设置，修改后需要重启服务。
+只接收 Webhook 但不访问私有仓库、不回写评论且不执行自动修复时，可以不设置 PAT。密钥必须在启动 PRVolve 前设置，修改后需要重启服务。
 
 ### 2. 建立公网转发
 
@@ -329,7 +331,7 @@ cloudflared tunnel --url http://127.0.0.1:8080
 ngrok http 8080
 ```
 
-命令启动后会显示一个形如 `https://example.trycloudflare.com` 或 `https://example.ngrok-free.app` 的公网 HTTPS 地址。保持 EvoAgent 和转发进程同时运行。临时公网地址通常会在转发工具重启后变化，变化后必须同步更新 GitHub Webhook 的 Payload URL。
+命令启动后会显示一个形如 `https://example.trycloudflare.com` 或 `https://example.ngrok-free.app` 的公网 HTTPS 地址。保持 PRVolve 和转发进程同时运行。临时公网地址通常会在转发工具重启后变化，变化后必须同步更新 GitHub Webhook 的 Payload URL。
 
 上述快捷转发会把 8080 端口上的管理台和 API 一并暴露到公网，因此必须保持 `EVOAGENT_AUTH_REQUIRED=true`，并使用强管理员密码和随机 `EVOAGENT_AUTH_SECRET`。长期部署建议通过反向代理只公开 `/webhooks/github`（以及按需公开 `/health`），不要向公网暴露整个管理台。
 
@@ -344,7 +346,7 @@ ngrok http 8080
 - **Which events would you like to trigger this webhook?**：选择 **Let me select individual events**，只勾选 **Pull requests**；
 - **Active**：保持勾选。
 
-EvoAgent 会处理 `opened`、`reopened` 和 `synchronize` 三种 PR 动作；其他 `pull_request` 动作会正常接收但被忽略。服务会根据 payload 中的 `diff_url` 下载 Diff，并异步创建审查任务。
+PRVolve 会处理 `opened`、`reopened` 和 `synchronize` 三种 PR 动作；其他 `pull_request` 动作会正常接收但被忽略。服务会根据 payload 中的 `diff_url` 下载 Diff，并异步创建审查任务。
 
 ### 4. 验证连接
 
@@ -408,7 +410,7 @@ HTTP / GitHub Webhook
  ReviewService ── TaskStore(SQLite / PostgreSQL)
         │
         ▼
- ReviewHarness (EvoAgent Runtime / checkpoint / resume / budget / trace)
+ ReviewHarness (PRVolve Runtime / checkpoint / resume / budget / trace)
         │
         ├── DiffParser
         ├── Redis Streams / ACK / lease / retry / DLQ
