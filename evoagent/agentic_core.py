@@ -1614,13 +1614,13 @@ class ModeRouterReviewer(Reviewer):
             r"\b%s\.pop\s*\(" % re.escape(loop_mutation.group(1)), lowered,
         ):
             probe_kinds.append("dict-mutation-during-iteration")
-        if "as_tuple().exponent" in lowered and any(
-            operator in lowered for operator in (">=", "<=", " > ", " < ")
+        if (
+            "as_tuple().exponent" in lowered
+            and "isinstance(exponent, int)" not in lowered
+            and any(operator in lowered for operator in (">=", "<=", " > ", " < "))
         ):
             probe_kinds.append("decimal-special-exponent")
-        if "memo.add(" in lowered and any(
-            token in lowered for token in ("exc_value", "exception")
-        ):
+        if re.search(r"memo\.add\(\s*exc_value\s*\)", lowered):
             probe_kinds.append("unhashable-exception-membership")
         if (
             re.search(r"(?m)^\s*with\s+os\.scandir\s*\(", semantic_text)
@@ -1946,9 +1946,11 @@ class ModeRouterReviewer(Reviewer):
                 reasons.append(
                     "low-severity model finding remains advisory"
                 )
-            if finding.confidence + 1e-9 < 0.8:
+            confidence_threshold = 0.7 if claim_refs else 0.8
+            if finding.confidence + 1e-9 < confidence_threshold:
                 reasons.append(
-                    "model confidence below stable publication threshold 0.80"
+                    "model confidence below stable publication threshold %.2f"
+                    % confidence_threshold
                 )
             normalized_fix = re.sub(
                 r"[^a-z0-9]+", " ", str(finding.fix or "").lower()

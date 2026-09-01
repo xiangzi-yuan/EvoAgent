@@ -274,6 +274,63 @@ class FindingPolicyTests(unittest.TestCase):
         self.assertEqual([], suggestions)
         self.assertEqual("confirmed", decisions[0]["disposition"])
 
+    def test_verified_behavioral_claim_uses_evidence_backed_threshold(self):
+        candidate = finding(
+            rule_id="CWE-703", source="correctness-reliability",
+            severity=Severity.MEDIUM,
+        )
+        candidate.title = "Missing directory error escapes scanner"
+        candidate.explanation = "os.scandir raises FileNotFoundError before entry."
+        candidate.confidence = 0.7
+        candidate.evidence_refs = [{
+            "evidence_id": "semantic_probe:scandir",
+            "tool": "semantic_probe",
+            "output": {
+                "kind": "scandir-missing-directory",
+                "scandir_open_raises": True,
+                "arbitrary_code_executed": False,
+            },
+        }]
+
+        published, suggestions, decisions = ModeRouterReviewer._partition_publication(
+            [], [candidate], [candidate],
+            [{"finding_index": 0, "publication_ready": True}],
+            repository_available=True,
+            publish_unverified_suggestions=False,
+        )
+
+        self.assertEqual([candidate], published)
+        self.assertEqual([], suggestions)
+        self.assertEqual("confirmed", decisions[0]["disposition"])
+
+    def test_behavioral_claim_below_evidence_backed_threshold_is_rejected(self):
+        candidate = finding(rule_id="CWE-703", severity=Severity.MEDIUM)
+        candidate.title = "Missing directory error escapes scanner"
+        candidate.explanation = "os.scandir raises FileNotFoundError before entry."
+        candidate.confidence = 0.69
+        candidate.evidence_refs = [{
+            "evidence_id": "semantic_probe:scandir",
+            "tool": "semantic_probe",
+            "output": {
+                "kind": "scandir-missing-directory",
+                "scandir_open_raises": True,
+                "arbitrary_code_executed": False,
+            },
+        }]
+
+        published, _suggestions, decisions = ModeRouterReviewer._partition_publication(
+            [], [candidate], [candidate],
+            [{"finding_index": 0, "publication_ready": True}],
+            repository_available=True,
+            publish_unverified_suggestions=False,
+        )
+
+        self.assertEqual([], published)
+        self.assertIn(
+            "model confidence below stable publication threshold 0.70",
+            decisions[0]["reasons"],
+        )
+
     def test_self_refuting_model_finding_is_not_published(self):
         candidate = finding(rule_id="CWE-248", source="correctness-reliability")
         candidate.title = "Guard raises TypeError"

@@ -433,6 +433,33 @@ class AgenticEvaluationTests(unittest.TestCase):
         )
         self.assertEqual([], clean_tools.calls)
 
+    def test_preflight_does_not_probe_guarded_decimal_or_hashed_exception_id(self):
+        class RecordingTools:
+            def __init__(self):
+                self.calls = []
+
+            def names(self):
+                return ["semantic_probe"]
+
+            def invoke(self, name, arguments):
+                self.calls.append((name, dict(arguments)))
+                return RepositoryToolSuite.semantic_probe(arguments["kind"])
+
+        parsed = parse_unified_diff(
+            "--- a/app.py\n+++ b/app.py\n@@ -1 +1,4 @@\n"
+            "+exponent = value.as_tuple().exponent\n"
+            "+if isinstance(exponent, int) and exponent >= 0:\n"
+            "+    return int(value)\n"
+            "+memo.add(id(exc_value))\n"
+        )
+        tools = RecordingTools()
+
+        ModeRouterReviewer._repository_preflight(
+            {"files": parsed.files}, parsed, tools, repository_available=False,
+        )
+
+        self.assertEqual([], tools.calls)
+
     def test_preflight_probes_missing_scandir_and_blank_netrc_only_on_regressions(self):
         class RecordingTools:
             def __init__(self):
