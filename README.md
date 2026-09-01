@@ -249,6 +249,14 @@ GitPython 案例使用固定的 `git-option-normalization` 探针对比 `upload_
 
 一次 DeepSeek V4 Flash 四角色实跑中，三个缺陷家族均形成了定位到新增行、包含根因、修复和测试建议的 Finding，三个公开修复方向全部静默。原始自动分数为 TP=2、FP=1、FN=2；人工复核发现 Click 只是 CWE 可接受集合漏掉了模型给出的 `CWE-691`，Sphinx 则把一个已合并发布的共同根因错误拆成两个必需评论。修正标签后使用同一缓存输出重算为 TP=3、FP=0、FN=0，未再次调用模型。Flask 干净方向有一个 Reviewer 子任务耗尽预算，因此全角色成功率为 83.33%，这是本轮明确保留的稳定性警告。完整原始报告、复核理由和限制见 `benchmarks/python_three_repo_extension_v1_baseline.json`。
 
+### Python 13 仓库上下文双轮复测
+
+`benchmarks/python_all_13_repo_canary_v1.jsonl` 合并 13 个 Python 缺陷家族及其公开修复方向，共 26 条记录，覆盖 12 个 GitHub PR 和 1 个公开修复提交。每条记录使用独立的可移植 Git checkout；两轮开始前均校验容器可读性和 HEAD，最终 52/52 次执行都获得了真实仓库上下文，且没有运行仓库测试、任意命令、攻击载荷或仓库网络操作。
+
+两轮使用完全相同的 DeepSeek V4 Flash、四角色、64000 tokens/PR、180 秒/PR 配置，中间没有修改代码、Prompt 或发布门禁，也没有复用模型缓存。人工复核只在两轮全部结束后处理标签别名和额外评论，不修改模型输出、不重新调用模型：第一轮为 TP=13、FP=2、FN=0，Precision 86.67%、Recall 100%、F1 92.86%；第二轮为 TP=12、FP=1、FN=1，Precision/Recall/F1 均为 92.31%。两轮合计 TP=25、FP=3、FN=1，Precision 89.29%、Recall 96.15%、F1 92.59%；风险命中率与干净修复静默率均为 96.15%，四个高危家族两轮保持 8/8 命中。
+
+结果说明基础能力已经可用，但还没有达到“完全稳定”：23/26 条案例的 TP/FP/FN 结果跨轮一致，同时考虑 Reviewer 降级状态时只有 20/26 一致；四次案例执行出现子角色预算或 JSON 输出失败。唯一真实漏检是第二轮 Sphinx 不可哈希注解案例；其余不稳定项是 pytest 修复方向的一次无效评论、Flask 的一次无效附加评论和 Sphinx 的一次重复评论。完整原始报告、复核后报告、SHA-256、逐项人工判定和限制见 `benchmarks/python_all_13_repo_canary_v1_baseline.json`。这组样本是刻意选择的明显公开缺陷，可作为面试演示与回归门禁，但不能外推为任意真实 PR 的生产准确率。
+
 ### 统一 10 案例家族回归
 
 提交 `7a78eb2` 使用同一 DeepSeek V4 Flash 配置复跑了 6 个普通 Python PR 和 4 组安全案例。安全案例包含风险回放与干净修复两个方向，因此一共执行 14 条评测记录。完整机器可读结论见 `benchmarks/uniform_10_family_deepseek_v4_flash_7a78eb2_baseline.json`。

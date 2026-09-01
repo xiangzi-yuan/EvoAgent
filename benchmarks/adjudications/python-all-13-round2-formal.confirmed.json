@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "status": "confirmed",
+  "reviewer": "codex-manual-semantic-review",
+  "reviewed_at": "2026-09-01",
+  "source_report": "output/python-all-13-repo-canary-v1/agentic/uniform-5fe09ed-round2.json",
+  "source_report_sha256": "94217257c136e321d3e4595519ba4cbcc5493034d5b66c000254277097794723",
+  "cases": {
+    "python-flask-6096-ipv6-server-name-regression": [
+      {
+        "path": "src/flask/app.py",
+        "line": 735,
+        "rule_id": "CWE-703",
+        "severity": "medium",
+        "verdict": "invalid",
+        "note": "The finding admits that urlsplit().port also raises ValueError for an invalid port. It does not establish a new correctness regression beyond the separately matched IPv6 parsing defect."
+      }
+    ]
+  }
+}

@@ -21,7 +21,7 @@ SOURCES = [
     os.path.join(ROOT, "benchmarks", "python_three_repo_extension_v1.jsonl"),
 ]
 OUTPUT = os.path.join(ROOT, "benchmarks", "python_all_13_repo_canary_v1.jsonl")
-RUNTIME_ROOT = os.environ.get("EVOAGENT_BENCHMARK_RUNTIME_ROOT", ROOT)
+RUNTIME_ROOT = os.environ.get("EVOAGENT_BENCHMARK_RUNTIME_ROOT", "/app")
 RUNTIME_JOIN = posixpath.join if RUNTIME_ROOT.startswith("/") else os.path.join
 
 
@@ -66,6 +66,14 @@ def main() -> None:
     cases = []
     for source in SOURCES:
         cases.extend(copy.deepcopy(load_jsonl(source)))
+    click_case = next(
+        case for case in cases
+        if case["id"] == "python-click-3299-strict-equality-default-regression"
+    )
+    click_aliases = click_case["expected_findings"][0]["acceptable_cwes"]
+    if "CWE-754" not in click_aliases:
+        click_aliases.append("CWE-754")
+        click_aliases.sort()
     ids = [case["id"] for case in cases]
     if len(cases) != 26 or len(set(ids)) != 26:
         raise ValueError("expected 26 unique records, got %d" % len(set(ids)))

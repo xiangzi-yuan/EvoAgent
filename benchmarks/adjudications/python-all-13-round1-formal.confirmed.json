@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "status": "confirmed",
+  "reviewer": "codex-manual-semantic-review",
+  "reviewed_at": "2026-09-01",
+  "source_report": "output/python-all-13-repo-canary-v1/agentic/uniform-5fe09ed-round1.json",
+  "source_report_sha256": "bf96b0971b773e5b300e311561dd646205565246cc0737dbe83316f4cf5e6094",
+  "cases": {
+    "python-sphinx-10183-unhashable-annotation-regression": [
+      {
+        "path": "sphinx/util/typing.py",
+        "line": 138,
+        "rule_id": "CWE-248",
+        "severity": "medium",
+        "verdict": "duplicate",
+        "note": "This reports the same removed TypeError guard and fix as the required consolidated finding at line 377. The two call sites should be one PR review comment, not two independent defects."
+      }
+    ]
+  }
+}
