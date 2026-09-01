@@ -2123,8 +2123,13 @@ class ModeRouterReviewer(Reviewer):
                     )
                     same_probe_claim = bool(
                         semantic_ids.intersection(existing_ids)
-                        and existing.rule_id == finding.rule_id
-                        and abs(existing.line - finding.line) <= 5
+                        and (
+                            existing.line == finding.line
+                            or (
+                                existing.rule_id == finding.rule_id
+                                and abs(existing.line - finding.line) <= 5
+                            )
+                        )
                     )
                     if (
                         existing.path == finding.path

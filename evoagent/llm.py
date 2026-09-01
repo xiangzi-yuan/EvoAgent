@@ -123,15 +123,17 @@ class JsonChatClient:
                         )
                     if attempt < max_attempts - 1:
                         messages = [
-                            *messages,
-                            {"role": "assistant", "content": content[:16000]},
+                            {
+                                "role": "system",
+                                "content": (
+                                    "You are a strict JSON syntax repair engine. Preserve the "
+                                    "input object's keys, values and meaning. Repair syntax only "
+                                    "and return one JSON object with no Markdown or explanation."
+                                ),
+                            },
                             {
                                 "role": "user",
-                                "content": (
-                                    "The previous response was not valid JSON. Correct only "
-                                    "its JSON syntax and return one strict JSON object with no "
-                                    "Markdown fence or explanatory text."
-                                ),
+                                "content": "Repair this malformed JSON object:\n" + content[:64000],
                             },
                         ]
                         continue

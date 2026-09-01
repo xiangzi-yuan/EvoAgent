@@ -626,6 +626,38 @@ class AgenticEvaluationTests(unittest.TestCase):
         self.assertEqual(1, len(merged))
         self.assertEqual(12, merged[0].line)
 
+    def test_same_semantic_probe_deduplicates_taxonomy_variants_on_same_line(self):
+        shared_ref = {
+            "evidence_id": "semantic_probe:netrc",
+            "tool": "semantic_probe",
+            "output": {
+                "kind": "empty-netrc-credentials",
+                "blank_credentials_pass_tuple_truthiness": True,
+                "arbitrary_code_executed": False,
+            },
+        }
+        values = [
+            Finding(
+                rule_id=rule_id, severity=Severity.MEDIUM,
+                title=title,
+                explanation="A truthy blank tuple returns empty credentials.",
+                path="auth.py", line=20, evidence="if credentials:",
+                evidence_refs=[shared_ref], fix="Check any(credentials).",
+                test="Cover blank credentials.", confidence=confidence,
+                source=source,
+            )
+            for rule_id, title, confidence, source in (
+                ("CWE-252", "Blank tuple is accepted", 0.9,
+                 "correctness-reliability"),
+                ("CWE-522", "Empty credentials are returned", 0.95, "security"),
+            )
+        ]
+
+        merged = ModeRouterReviewer._merge(values)
+
+        self.assertEqual(1, len(merged))
+        self.assertEqual("CWE-522", merged[0].rule_id)
+
     def test_semantic_merge_prefers_the_claim_actually_proved_by_probe(self):
         shared_ref = {
             "evidence_id": "semantic_probe:git",

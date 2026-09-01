@@ -41,7 +41,9 @@ class JsonChatClientTests(unittest.TestCase):
         self.assertFalse(calls[0]["ok"])
         self.assertTrue(calls[1]["ok"])
         retry_payload = json.loads(urlopen.call_args_list[1].args[0].data.decode("utf-8"))
-        self.assertIn("not valid JSON", retry_payload["messages"][-1]["content"])
+        self.assertEqual(2, len(retry_payload["messages"]))
+        self.assertIn("JSON syntax repair engine", retry_payload["messages"][0]["content"])
+        self.assertIn("malformed JSON object", retry_payload["messages"][-1]["content"])
 
     @mock.patch("evoagent.llm.urllib.request.urlopen")
     def test_json_markdown_fence_is_removed_locally(self, urlopen):
