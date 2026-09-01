@@ -8,7 +8,7 @@ import re
 import textwrap
 import threading
 import time
-from typing import Any, Dict, Iterable, List, Optional, Set
+from typing import Any, Callable, Dict, Iterable, List, Optional, Set
 
 from .diff_parser import ParsedDiff
 from .finding_policy import (
@@ -157,6 +157,7 @@ class BoundedRole:
         context_manager: Optional[ContextManager] = None,
         working_memory_supplier=None, observation_sink=None,
         minimum_tool_calls: int = 0,
+        final_action_validator: Optional[Callable[[Dict[str, Any]], str]] = None,
     ):
         self.name = name
         self.prompt = prompt
@@ -168,6 +169,7 @@ class BoundedRole:
         self.working_memory_supplier = working_memory_supplier
         self.observation_sink = observation_sink
         self.minimum_tool_calls = max(0, int(minimum_tool_calls))
+        self.final_action_validator = final_action_validator
 
     def run(
         self, user_context: str, tools: ToolRegistry, ledger: ExecutionLedger,
@@ -310,6 +312,80 @@ class BoundedRole:
                         unresolved=unresolved,
                     )
                     continue
+                finding_resolutions = {
+                    str(item.get("evidence_id", ""))
+                    for item in action.get("evidence_resolutions") or []
+                    if isinstance(item, dict)
+                    and str(item.get("status", "")).strip().lower() == "finding"
+                    and str(item.get("evidence_id", "")).strip()
+                }
+                finding_citations = {
+                    str(value)
+                    for finding in action.get("findings") or []
+                    if isinstance(finding, dict)
+                    for value in finding.get("evidence_ids") or []
+                }
+                uncited_findings = sorted(finding_resolutions - finding_citations)
+                if uncited_findings:
+                    observations.append({
+                        "step": step, "tool": "protocol-requirement", "ok": False,
+                        "error": (
+                            "An evidence_resolution with status finding must have a "
+                            "corresponding structured Finding that cites the same evidence_id. "
+                            "Return the missing Finding or change the resolution to refuted "
+                            "with repository-backed counter-evidence. Inconsistent: "
+                            + ", ".join(uncited_findings)
+                        ),
+                    })
+                    ledger.trace(
+                        self.name, "finding_resolution_without_finding", step=step,
+                        evidence_ids=uncited_findings,
+                    )
+                    continue
+                if self.final_action_validator is not None:
+                    candidate = dict(action)
+                    candidate["_observations"] = observations
+                    validation_error = str(
+                        self.final_action_validator(candidate) or ""
+                    ).strip()
+                    if validation_error:
+                        positive_evidence = sorted({
+                            str(item.get("evidence_id", ""))
+                            for item in action.get("evidence_resolutions") or []
+                            if isinstance(item, dict)
+                            and str(item.get("status", "")).strip().lower() == "finding"
+                            and str(item.get("evidence_id", "")).strip()
+                        })
+                        observation = {
+                            "step": step, "tool": "protocol-requirement", "ok": False,
+                            "error": validation_error[:4000],
+                        }
+                        if positive_evidence:
+                            pending_id = "protocol-finding:" + positive_evidence[0]
+                            observation["result"] = {
+                                "evidence_id": pending_id,
+                                "tool": "protocol-requirement",
+                                "output": {
+                                    "requires_resolution": True,
+                                    "resolution_question": (
+                                        "The prior final action positively identified a defect but "
+                                        "failed output validation. Return a corrected Finding citing "
+                                        "this protocol evidence, or explicitly refute it with new "
+                                        "successful repository evidence. Original evidence: "
+                                        + ", ".join(positive_evidence)
+                                    ),
+                                },
+                            }
+                            observation["error"] += (
+                                " The prior positive Finding remains pending as %s; do not silently "
+                                "drop it." % pending_id
+                            )
+                        observations.append(observation)
+                        ledger.trace(
+                            self.name, "final_action_validation_failed", step=step,
+                            error=validation_error[:1000],
+                        )
+                        continue
                 action["_observations"] = observations
                 action["_steps"] = step
                 ledger.trace(self.name, "finished", step=step)
@@ -348,17 +424,14 @@ def _parse_findings(
     result: dict, parsed: ParsedDiff, role: str,
     validated_skills: Iterable[str] = (),
 ) -> List[Finding]:
-    valid = {(item.path, item.line) for item in parsed.added_lines}
     evidence = _collect_evidence(result.get("_observations") or [])
     validated_skills = set(validated_skills)
     findings = []
     for raw in result.get("findings") or []:
-        try:
-            path, line = str(raw.get("path", "")), int(raw.get("line", 0))
-        except (TypeError, ValueError):
+        location = _resolve_finding_location(raw, parsed)
+        if location is None:
             continue
-        if (path, line) not in valid:
-            continue
+        path, line = location
         try:
             severity = Severity(str(raw.get("severity", "medium")).lower())
         except ValueError:
@@ -373,7 +446,7 @@ def _parse_findings(
         except (TypeError, ValueError):
             confidence = 0.7
         original_rule_id = str(raw.get("rule_id", "LLM-OTHER"))[:160]
-        rule_id = normalize_rule_id(original_rule_id)
+        rule_id = _normalize_model_rule_id(raw)
         claimed_skill = str(raw.get("skill", "")).strip()
         source = (
             "agent-skill:" + claimed_skill
@@ -390,6 +463,108 @@ def _parse_findings(
             original_rule_id=(original_rule_id if original_rule_id != rule_id else ""),
         ))
     return findings
+
+
+def _resolve_finding_location(raw: dict, parsed: ParsedDiff) -> Optional[tuple]:
+    """Use an exact model location, or uniquely recover it from quoted added code."""
+    try:
+        path = str(raw.get("path", ""))
+        line = int(raw.get("line", 0))
+    except (TypeError, ValueError):
+        return None
+    valid = {(item.path, item.line) for item in parsed.added_lines}
+    if (path, line) in valid:
+        return path, line
+    quoted = str(raw.get("evidence", "")).strip()
+    if not path or not quoted or "\n" in quoted:
+        return None
+    matches = [
+        (item.path, item.line)
+        for item in parsed.added_lines
+        if item.path == path
+        and (
+            quoted == item.content.strip()
+            or quoted in item.content.strip()
+        )
+    ]
+    return matches[0] if len(matches) == 1 else None
+
+
+def _normalize_model_rule_id(raw: dict) -> str:
+    """Correct one narrow, auditable CWE mismatch while preserving the raw ID."""
+    rule_id = normalize_rule_id(str(raw.get("rule_id", "LLM-OTHER")))
+    if rule_id != "CWE-252":
+        return rule_id
+    claim = " ".join((
+        str(raw.get("title", "")), str(raw.get("explanation", "")),
+        str(raw.get("evidence", "")),
+    )).lower()
+    exception_cues = (
+        "exception", "typeerror", "keyerror", "runtimeerror",
+        "unboundlocalerror", "raises", "crash",
+    )
+    return_status_cues = (
+        "unchecked return", "return status", "return code",
+        "status code", "fails to inspect", "not checked by the caller",
+    )
+    if (
+        any(cue in claim for cue in exception_cues)
+        and not any(cue in claim for cue in return_status_cues)
+    ):
+        return "CWE-248"
+    return rule_id
+
+
+def _worker_final_validation_error(result: dict, parsed: ParsedDiff) -> str:
+    """Reject positive evidence that would be silently lost during finding parsing."""
+    errors = []
+    finding_resolutions = {
+        str(item.get("evidence_id", ""))
+        for item in result.get("evidence_resolutions") or []
+        if isinstance(item, dict)
+        and str(item.get("status", "")).strip().lower() == "finding"
+        and str(item.get("evidence_id", "")).strip()
+    }
+    valid_citations = set()
+    rejected_locations = []
+    for raw in result.get("findings") or []:
+        if not isinstance(raw, dict):
+            continue
+        evidence_ids = {
+            str(value) for value in raw.get("evidence_ids") or []
+            if str(value).strip()
+        }
+        location = _resolve_finding_location(raw, parsed)
+        if location is not None:
+            valid_citations.update(evidence_ids)
+        else:
+            rejected_locations.append(
+                "%s:%s" % (str(raw.get("path", "")), str(raw.get("line", 0)))
+            )
+
+    missing = sorted(finding_resolutions - valid_citations)
+    if not missing and not rejected_locations:
+        return " ".join(errors)
+
+    allowed = {}
+    for item in parsed.added_lines:
+        allowed.setdefault(item.path, []).append(item.line)
+    allowed_text = "; ".join(
+        "%s:%s" % (path, ",".join(str(line) for line in lines[:40]))
+        for path, lines in allowed.items()
+    )
+    errors.append(
+        "Every structured Finding must identify an added diff line. The current Finding "
+        "would be discarded by validation. Return the same defect anchored to its exact "
+        "causal added line. Unmatched positive evidence IDs: %s. "
+        "Rejected locations: %s. Valid added locations: %s"
+        % (
+            ", ".join(missing),
+            ", ".join(rejected_locations) or "missing/invalid",
+            allowed_text or "none",
+        )
+    )
+    return " ".join(errors)
 
 
 class ModeRouterReviewer(Reviewer):
@@ -1100,6 +1275,9 @@ class ModeRouterReviewer(Reviewer):
                 working_memory_supplier=working_memory_supplier,
                 observation_sink=observation_sink,
                 minimum_tool_calls=int(suite.repository_available),
+                final_action_validator=lambda action: _worker_final_validation_error(
+                    action, parsed,
+                ),
             )
             context = {
                 "lead_assignment": assignment,
@@ -1110,13 +1288,20 @@ class ModeRouterReviewer(Reviewer):
                     risk_domains=assignment.get("risk_domains") or (),
                 ),
                 "changed_files": parsed.files,
+                "scoreable_added_lines": [
+                    {"path": item.path, "line": item.line, "content": item.content}
+                    for item in parsed.added_lines[:200]
+                    if item.path in (assignment.get("files") or parsed.files)
+                ],
                 "scanner_findings": session["scanner_findings"],
                 "repository_context_available": suite.repository_available,
                 "recalled_memory": memory_context or {"items": []},
                 "active_agent_skills": [skill.runtime_entry() for skill in selected_skills],
                 "instruction": (
                     "Report only to the Lead. Return final findings with exact changed-line "
-                    "evidence and address every required_evidence item."
+                    "evidence and address every required_evidence item. A Finding path/line "
+                    "must come from scoreable_added_lines; read_file start_line does not "
+                    "renumber its content."
                 ),
             }
             tools = suite.registry(
@@ -1409,6 +1594,22 @@ class ModeRouterReviewer(Reviewer):
             r"len\(\s*[a-z_][a-z0-9_]*\.[a-z_][a-z0-9_]*", lowered,
         ):
             probe_kinds.append("nullable-length")
+        loop_mutation = re.search(
+            r"for\s+[a-z_][a-z0-9_]*\s+in\s+([a-z_][a-z0-9_]*)\s*:",
+            lowered,
+        )
+        if loop_mutation and re.search(
+            r"\b%s\.pop\s*\(" % re.escape(loop_mutation.group(1)), lowered,
+        ):
+            probe_kinds.append("dict-mutation-during-iteration")
+        if "as_tuple().exponent" in lowered and any(
+            operator in lowered for operator in (">=", "<=", " > ", " < ")
+        ):
+            probe_kinds.append("decimal-special-exponent")
+        if "memo.add(" in lowered and any(
+            token in lowered for token in ("exc_value", "exception")
+        ):
+            probe_kinds.append("unhashable-exception-membership")
         if selected and "semantic_probe" in tools.names():
             for kind in probe_kinds[:3]:
                 try:
@@ -1682,10 +1883,61 @@ class ModeRouterReviewer(Reviewer):
                 reasons.append("Critic did not complete all publication checks")
             repository_refs = repository_evidence_refs(finding)
             claim_refs = claim_specific_high_risk_evidence_refs(finding)
+            severity_adjustment = {}
+            critic_ready = bool(
+                not critic_required or critic.get("publication_ready")
+            )
+            impact_claim = " ".join((
+                finding.title, finding.explanation, finding.evidence,
+            )).lower()
+            high_impact_cues = (
+                "data loss", "data corruption", "service-wide", "global outage",
+                "all requests", "irreversible", "deadlock", "authentication bypass",
+            )
+            high_impact_supported = bool(
+                claim_refs and any(cue in impact_claim for cue in high_impact_cues)
+            )
+            if (
+                finding.severity == Severity.HIGH
+                and finding.source == "correctness-reliability"
+                and lead_selected
+                and critic_ready
+                and repository_refs
+                and not high_impact_supported
+            ):
+                finding.severity = Severity.MEDIUM
+                severity_adjustment = {
+                    "from": "high", "to": "medium",
+                    "reason": (
+                        "correctness defect is repository-backed, but high impact "
+                        "is not supported by concrete outage, data-loss, or corruption evidence"
+                    ),
+                }
             if not repository_available and not claim_refs:
                 reasons.append("repository context is unavailable")
             if not repository_refs:
                 reasons.append("no repository-backed tool evidence")
+            if finding.severity == Severity.LOW:
+                reasons.append(
+                    "low-severity model finding remains advisory"
+                )
+            if finding.confidence < 0.8:
+                reasons.append(
+                    "model confidence below stable publication threshold 0.80"
+                )
+            hypothetical_scope_claim = any(
+                cue in impact_claim for cue in (
+                    "false positive", "incorrectly reject", "overly broad",
+                )
+            )
+            if (
+                finding.source == "correctness-reliability"
+                and hypothetical_scope_claim
+                and not claim_refs
+            ):
+                reasons.append(
+                    "hypothetical rejection claim lacks behavioral or configured-value evidence"
+                )
             if (
                 finding.severity in {Severity.CRITICAL, Severity.HIGH}
                 and not claim_refs
@@ -1731,6 +1983,7 @@ class ModeRouterReviewer(Reviewer):
                 "repository_evidence_ids": [
                     item.get("evidence_id") for item in repository_refs
                 ],
+                "severity_adjustment": severity_adjustment,
             })
 
         return cls._merge(published), cls._merge(suggestions), decisions
@@ -1801,25 +2054,43 @@ class ModeRouterReviewer(Reviewer):
         merged = {}
         for finding in findings:
             key = (finding.path, finding.line, finding.rule_id)
-            semantic_ids = {
+            evidence_ids = {
                 str(item.get("evidence_id"))
                 for item in finding.evidence_refs if isinstance(item, dict)
-                and str(item.get("evidence_id", "")).startswith("semantic_probe:")
+                and str(item.get("evidence_id", ""))
             }
-            if semantic_ids and not is_deterministic_finding(finding):
+            semantic_ids = {
+                value for value in evidence_ids
+                if value.startswith("semantic_probe:")
+            }
+            if evidence_ids and not is_deterministic_finding(finding):
+                title_tokens = set(re.findall(
+                    r"[a-z0-9_]+", str(finding.title).lower()
+                ))
                 for existing_key, existing in merged.items():
                     existing_ids = {
                         str(item.get("evidence_id"))
                         for item in existing.evidence_refs if isinstance(item, dict)
-                        and str(item.get("evidence_id", "")).startswith(
-                            "semantic_probe:"
-                        )
+                        and str(item.get("evidence_id", ""))
                     }
+                    existing_tokens = set(re.findall(
+                        r"[a-z0-9_]+", str(existing.title).lower()
+                    ))
+                    title_overlap = (
+                        len(title_tokens.intersection(existing_tokens))
+                        / max(1, min(len(title_tokens), len(existing_tokens)))
+                    )
                     if (
                         existing.path == finding.path
                         and existing.line == finding.line
                         and not is_deterministic_finding(existing)
-                        and semantic_ids.intersection(existing_ids)
+                        and (
+                            semantic_ids.intersection(existing_ids)
+                            or (
+                                evidence_ids.intersection(existing_ids)
+                                and title_overlap >= 0.6
+                            )
+                        )
                     ):
                         key = existing_key
                         break

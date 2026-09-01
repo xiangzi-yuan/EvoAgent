@@ -118,7 +118,7 @@ class Settings:
     alert_smtp_host: str = ""
     alert_email_to: str = ""
     continuous_eval_seconds: int = 0
-    agent_token_budget: int = 8000
+    agent_token_budget: int = 16000
     agent_time_budget_seconds: int = 60
     agent_context_window_tokens: int = 32768
     agent_context_input_tokens: int = 20000
@@ -287,7 +287,7 @@ class Settings:
             continuous_eval_seconds=_non_negative_int(
                 "EVOAGENT_CONTINUOUS_EVAL_SECONDS", 0
             ),
-            agent_token_budget=_int("EVOAGENT_AGENT_TOKEN_BUDGET", 8000),
+            agent_token_budget=_int("EVOAGENT_AGENT_TOKEN_BUDGET", 16000),
             agent_time_budget_seconds=_int("EVOAGENT_AGENT_TIME_BUDGET_SECONDS", 60),
             agent_context_window_tokens=_int(
                 "EVOAGENT_AGENT_CONTEXT_WINDOW_TOKENS", 32768

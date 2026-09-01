@@ -212,6 +212,49 @@ class FindingPolicyTests(unittest.TestCase):
         self.assertEqual([], suggestions)
         self.assertEqual("confirmed", decisions[0]["disposition"])
 
+    def test_low_severity_model_claim_remains_advisory(self):
+        candidate = finding(severity=Severity.LOW)
+        candidate.evidence_refs = [{
+            "evidence_id": "read_file:1234",
+            "tool": "read_file",
+            "output": {"path": "app.py", "content": "dangerous(value)"},
+        }]
+
+        published, suggestions, decisions = ModeRouterReviewer._partition_publication(
+            [], [candidate], [candidate],
+            [{"finding_index": 0, "publication_ready": True}],
+            repository_available=True,
+        )
+
+        self.assertEqual([], published)
+        self.assertEqual([candidate], suggestions)
+        self.assertIn(
+            "low-severity model finding remains advisory",
+            decisions[0]["reasons"],
+        )
+
+    def test_low_confidence_model_claim_remains_advisory(self):
+        candidate = finding()
+        candidate.confidence = 0.79
+        candidate.evidence_refs = [{
+            "evidence_id": "read_file:1234",
+            "tool": "read_file",
+            "output": {"path": "app.py", "content": "dangerous(value)"},
+        }]
+
+        published, suggestions, decisions = ModeRouterReviewer._partition_publication(
+            [], [candidate], [candidate],
+            [{"finding_index": 0, "publication_ready": True}],
+            repository_available=True,
+        )
+
+        self.assertEqual([], published)
+        self.assertEqual([candidate], suggestions)
+        self.assertIn(
+            "model confidence below stable publication threshold 0.80",
+            decisions[0]["reasons"],
+        )
+
     def test_same_line_repository_search_cannot_prove_high_risk_behavior(self):
         candidate = finding(severity=Severity.HIGH)
         candidate.evidence_refs = [{
@@ -229,6 +272,97 @@ class FindingPolicyTests(unittest.TestCase):
         self.assertEqual([candidate], suggestions)
         self.assertIn(
             "high-risk claim lacks behavioral or cross-call evidence",
+            decisions[0]["reasons"],
+        )
+
+    def test_repository_backed_correctness_claim_downgrades_unsupported_high_impact(self):
+        candidate = finding(
+            rule_id="CWE-703",
+            source="correctness-reliability",
+            severity=Severity.HIGH,
+        )
+        candidate.evidence_refs = [{
+            "evidence_id": "read_file:state",
+            "tool": "read_file",
+            "output": {"path": "app.py", "content": "dangerous(value)"},
+        }]
+
+        published, suggestions, decisions = ModeRouterReviewer._partition_publication(
+            [], [candidate], [candidate],
+            [{"finding_index": 0, "publication_ready": True}],
+            repository_available=True,
+            publish_unverified_suggestions=False,
+        )
+
+        self.assertEqual([candidate], published)
+        self.assertEqual([], suggestions)
+        self.assertEqual(Severity.MEDIUM, candidate.severity)
+        self.assertEqual("confirmed", decisions[0]["disposition"])
+        self.assertEqual(
+            {"from": "high", "to": "medium", "reason": (
+                "correctness defect is repository-backed, but high impact is not "
+                "supported by concrete outage, data-loss, or corruption evidence"
+            )},
+            decisions[0]["severity_adjustment"],
+        )
+
+    def test_behavioral_probe_proves_crash_but_not_high_impact(self):
+        candidate = finding(
+            rule_id="CWE-248",
+            source="correctness-reliability",
+            severity=Severity.HIGH,
+        )
+        candidate.title = "Unhashable exception crashes traceback rendering"
+        candidate.explanation = "Putting the exception in a set raises TypeError."
+        candidate.evidence_refs = [{
+            "evidence_id": "semantic_probe:unhashable",
+            "tool": "semantic_probe",
+            "output": {
+                "kind": "unhashable-exception-membership",
+                "set_insertion_raises": True,
+                "arbitrary_code_executed": False,
+            },
+        }]
+
+        published, _suggestions, decisions = ModeRouterReviewer._partition_publication(
+            [], [candidate], [candidate],
+            [{"finding_index": 0, "publication_ready": True}],
+            repository_available=True,
+            publish_unverified_suggestions=False,
+        )
+
+        self.assertEqual([candidate], published)
+        self.assertEqual(Severity.MEDIUM, candidate.severity)
+        self.assertEqual("medium", decisions[0]["severity_adjustment"]["to"])
+
+    def test_git_normalization_probe_does_not_prove_prefix_false_positive(self):
+        candidate = finding(
+            rule_id="CWE-697",
+            source="correctness-reliability",
+            severity=Severity.HIGH,
+        )
+        candidate.title = "Unsafe option check false positive for --config-file"
+        candidate.explanation = "A prefix comparison may incorrectly reject it."
+        candidate.evidence_refs = [{
+            "evidence_id": "semantic_probe:git-option-normalization",
+            "tool": "semantic_probe",
+            "output": {
+                "kind": "git-option-normalization",
+                "dangerous_flag_emitted_after_raw_check": True,
+                "arbitrary_code_executed": False,
+            },
+        }]
+
+        published, suggestions, decisions = ModeRouterReviewer._partition_publication(
+            [], [candidate], [candidate],
+            [{"finding_index": 0, "publication_ready": True}],
+            repository_available=True,
+        )
+
+        self.assertEqual([], published)
+        self.assertEqual([candidate], suggestions)
+        self.assertIn(
+            "hypothetical rejection claim lacks behavioral or configured-value evidence",
             decisions[0]["reasons"],
         )
 

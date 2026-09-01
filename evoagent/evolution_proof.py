@@ -42,7 +42,7 @@ def generate_prompt_evolution_cases() -> List[dict]:
             "SEC-HARDCODED-SECRET", "high",
             lambda n: 'api_key = "production-secret-%s"' % n,
         ),
-        ("REL-EMPTY-EXCEPT", "medium", lambda _n: "except Exception:"),
+        ("REL-EMPTY-EXCEPT", "medium", lambda _n: "except Exception: pass"),
     ]
     adaptive_risks = [
         (

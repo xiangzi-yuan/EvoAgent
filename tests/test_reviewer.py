@@ -42,6 +42,29 @@ class LocalReviewerTests(unittest.TestCase):
         self.assertEqual("app.py", findings[0].path)
         self.assertEqual("REL-DEBUG-PRINT", findings[0].rule_id)
 
+    def test_empty_except_rule_requires_a_pass_body(self):
+        swallowed = (
+            "--- a/app.py\n+++ b/app.py\n@@ -0,0 +1,2 @@\n"
+            "+except Exception:\n+    pass\n"
+        )
+        cleanup_and_reraise = (
+            "--- a/app.py\n+++ b/app.py\n@@ -0,0 +1,3 @@\n"
+            "+except Exception:\n+    cleanup()\n+    raise\n"
+        )
+
+        swallowed_findings = LocalRuleReviewer().review(
+            swallowed, parse_unified_diff(swallowed),
+        )
+        safe_findings = LocalRuleReviewer().review(
+            cleanup_and_reraise, parse_unified_diff(cleanup_and_reraise),
+        )
+
+        self.assertEqual(
+            ["REL-EMPTY-EXCEPT"],
+            [item.rule_id for item in swallowed_findings],
+        )
+        self.assertEqual([], safe_findings)
+
     def test_detects_jinja_sandbox_downgrade_but_not_security_fix(self):
         regression = (
             "--- a/environment.py\n+++ b/environment.py\n@@ -1,2 +1,2 @@\n"

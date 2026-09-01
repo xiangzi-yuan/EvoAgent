@@ -146,12 +146,19 @@ class LocalRuleReviewer(Reviewer):
     def review(self, diff: str, parsed: ParsedDiff) -> List[Finding]:
         findings: List[Finding] = []
         seen = set()
+        added_by_location = {
+            (item.path, item.line): item.content for item in parsed.added_lines
+        }
         for line in parsed.added_lines:
             if line.path.endswith((".lock", ".min.js", ".map")):
                 continue
             for rule_id, severity, pattern, title, explanation, fix, test in self.RULES:
                 if (
                     pattern.search(line.content)
+                    and (
+                        rule_id != "REL-EMPTY-EXCEPT"
+                        or self._is_empty_except(line, added_by_location)
+                    )
                     and not suppress_contextual_false_positive(
                         rule_id, line.content, line.path,
                     )
@@ -186,6 +193,17 @@ class LocalRuleReviewer(Reviewer):
         findings.extend(self._path_containment_removal(diff, parsed, seen))
         findings.extend(self._github_actions_expression_shell(diff, parsed, seen))
         return findings
+
+    @staticmethod
+    def _is_empty_except(line: ChangedLine, added_by_location: Dict[tuple, str]) -> bool:
+        """Only classify an added broad handler when its added body is literally pass."""
+        tail = line.content.split(":", 1)[1].strip()
+        if re.fullmatch(r"pass(?:\s*#.*)?", tail):
+            return True
+        if tail:
+            return False
+        following = added_by_location.get((line.path, line.line + 1), "")
+        return bool(re.fullmatch(r"\s*pass(?:\s*#.*)?", following))
 
     @staticmethod
     def _jinja_sandbox_downgrade(

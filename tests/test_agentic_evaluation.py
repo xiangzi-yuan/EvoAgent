@@ -2,7 +2,13 @@ import json
 import unittest
 
 from evoagent.diff_parser import parse_unified_diff
-from evoagent.agentic_core import BoundedRole, ModeRouterReviewer
+from evoagent.agentic_core import (
+    BoundedRole,
+    ModeRouterReviewer,
+    _normalize_model_rule_id,
+    _parse_findings,
+    _worker_final_validation_error,
+)
 from evoagent.evaluation_benchmark import ContextRuleReviewer
 from evoagent.evaluation_harness import one_to_one_match
 from evoagent.evaluation_v2 import (
@@ -202,6 +208,37 @@ class AgenticEvaluationTests(unittest.TestCase):
         )
         self.assertTrue(observations[0]["ok"])
 
+    def test_preflight_runs_fixed_python_runtime_contract_probes(self):
+        class RecordingTools:
+            def __init__(self):
+                self.calls = []
+
+            def names(self):
+                return ["semantic_probe"]
+
+            def invoke(self, name, arguments):
+                self.calls.append((name, dict(arguments)))
+                return RepositoryToolSuite.semantic_probe(arguments["kind"])
+
+        parsed = parse_unified_diff(
+            "--- a/app.py\n+++ b/app.py\n@@ -0,0 +1,5 @@\n"
+            "+for key in values:\n+    values.pop(key)\n"
+            "+if Decimal('NaN').as_tuple().exponent >= 0:\n+    pass\n"
+            "+memo.add(exc_value)\n"
+        )
+        tools = RecordingTools()
+
+        observations = ModeRouterReviewer._repository_preflight(
+            {"files": parsed.files}, parsed, tools, repository_available=False,
+        )
+
+        self.assertEqual([
+            ("semantic_probe", {"kind": "dict-mutation-during-iteration"}),
+            ("semantic_probe", {"kind": "decimal-special-exponent"}),
+            ("semantic_probe", {"kind": "unhashable-exception-membership"}),
+        ], tools.calls)
+        self.assertTrue(all(item["ok"] for item in observations))
+
     def test_repository_preflight_traces_template_environment_usage(self):
         class RecordingTools:
             def __init__(self):
@@ -292,6 +329,15 @@ class AgenticEvaluationTests(unittest.TestCase):
         sentinel = RepositoryToolSuite.semantic_probe(
             "sentinel-error-propagation"
         )["output"]
+        dict_mutation = RepositoryToolSuite.semantic_probe(
+            "dict-mutation-during-iteration"
+        )["output"]
+        decimal_exponent = RepositoryToolSuite.semantic_probe(
+            "decimal-special-exponent"
+        )["output"]
+        unhashable_exception = RepositoryToolSuite.semantic_probe(
+            "unhashable-exception-membership"
+        )["output"]
 
         self.assertTrue(serialization["excluded_field_update_lost"])
         self.assertTrue(equality["contract_violated"])
@@ -320,12 +366,19 @@ class AgenticEvaluationTests(unittest.TestCase):
         self.assertTrue(nullable_length["raises_when_value_is_none"])
         self.assertTrue(sentinel["conversion_failed"])
         self.assertTrue(sentinel["returned_missing_sentinel"])
+        self.assertTrue(dict_mutation["dict_size_change_raises"])
+        self.assertTrue(all(
+            item["comparison_with_zero_raises"]
+            for item in decimal_exponent["values"]
+        ))
+        self.assertTrue(unhashable_exception["set_insertion_raises"])
         self.assertTrue(all(
             item["arbitrary_code_executed"] is False
             for item in (
                 serialization, equality, decorators, cycle, alias, path,
                 security_default, workflow_expression, git_option,
                 nullable_length, sentinel, module_getattr,
+                dict_mutation, decimal_exponent, unhashable_exception,
             )
         ))
 
@@ -448,6 +501,56 @@ class AgenticEvaluationTests(unittest.TestCase):
 
         self.assertEqual(1, len(ModeRouterReviewer._merge(values)))
 
+    def test_same_repository_evidence_and_similar_title_are_deduplicated(self):
+        values = [
+            Finding(
+                rule_id=rule_id, severity=Severity.MEDIUM,
+                title=title, explanation="Empty credentials are returned.",
+                path="app.py", line=5, evidence="if credentials:",
+                evidence_refs=[{
+                    "evidence_id": "read_file:same", "tool": "read_file",
+                    "output": {"path": "app.py", "content": "if credentials:"},
+                }],
+                fix="Reject empty credentials.", test="Cover an empty tuple.",
+                source=source, confidence=confidence,
+            )
+            for rule_id, source, title, confidence in (
+                (
+                    "CWE-522", "security",
+                    "get_auth returns empty credentials for default entry", 0.9,
+                ),
+                (
+                    "CWE-252", "correctness-reliability",
+                    "get_auth returns empty credentials when entry is blank", 0.95,
+                ),
+            )
+        ]
+
+        merged = ModeRouterReviewer._merge(values)
+
+        self.assertEqual(1, len(merged))
+        self.assertEqual("CWE-252", merged[0].rule_id)
+
+    def test_distinct_claims_at_same_location_are_not_merged(self):
+        values = [
+            Finding(
+                rule_id=rule_id, severity=Severity.MEDIUM,
+                title=title, explanation="Repository-backed defect.",
+                path="app.py", line=5, evidence="process(value)",
+                evidence_refs=[{
+                    "evidence_id": "read_file:same", "tool": "read_file",
+                    "output": {"path": "app.py", "content": "process(value)"},
+                }],
+                fix="Fix it.", test="Cover it.", source=source,
+            )
+            for rule_id, source, title in (
+                ("CWE-400", "security", "Unbounded input exhausts memory"),
+                ("CWE-772", "correctness-reliability", "File handle is never closed"),
+            )
+        ]
+
+        self.assertEqual(2, len(ModeRouterReviewer._merge(values)))
+
     def test_delegation_coverage_gate_assigns_every_production_source(self):
         delegations = ModeRouterReviewer._normalize_delegations(
             [{
@@ -540,6 +643,163 @@ class AgenticEvaluationTests(unittest.TestCase):
         self.assertEqual(2, result["_steps"])
         self.assertEqual("protocol-requirement", result["_observations"][-1]["tool"])
         self.assertIn("semantic_probe:test", result["_observations"][-1]["error"])
+
+    def test_worker_finding_resolution_requires_structured_finding(self):
+        class SequencedClient:
+            def __init__(self):
+                self.actions = [
+                    {
+                        "action": "final", "findings": [],
+                        "evidence_resolutions": [{
+                            "evidence_id": "read_file:defect",
+                            "status": "finding",
+                            "explanation": "The value is used before assignment.",
+                        }],
+                    },
+                    {
+                        "action": "final",
+                        "findings": [{
+                            "rule_id": "CWE-457", "severity": "high",
+                            "title": "Value used before assignment",
+                            "explanation": "The false branch leaves value undefined.",
+                            "path": "app.py", "line": 2, "evidence": "consume(value)",
+                            "evidence_ids": ["read_file:defect"],
+                            "call_chain": [], "fix": "Initialize value before the branch.",
+                            "test": "Exercise the false branch.", "confidence": 0.95,
+                            "skill": "",
+                        }],
+                        "evidence_resolutions": [{
+                            "evidence_id": "read_file:defect",
+                            "status": "finding",
+                            "explanation": "The value is used before assignment.",
+                        }],
+                    },
+                ]
+
+            def complete_json(self, *_args, **_kwargs):
+                return self.actions.pop(0)
+
+        result = BoundedRole(
+            "correctness-reliability", "Review.", SequencedClient(),
+            token_budget=4000, time_budget=30,
+        ).run(
+            "{}", ToolRegistry([]), ExecutionLedger("agentic"),
+            initial_observations=[{
+                "step": 0, "tool": "read_file", "ok": True,
+                "result": {
+                    "evidence_id": "read_file:defect", "tool": "read_file",
+                    "output": {"path": "app.py", "content": "consume(value)"},
+                },
+            }],
+        )
+
+        self.assertEqual(2, result["_steps"])
+        self.assertEqual(1, len(result["findings"]))
+        self.assertEqual("protocol-requirement", result["_observations"][-1]["tool"])
+        self.assertIn("read_file:defect", result["_observations"][-1]["error"])
+
+    def test_worker_retries_when_final_finding_location_fails_validation(self):
+        class SequencedClient:
+            def __init__(self):
+                self.actions = [
+                    {
+                        "action": "final",
+                        "findings": [{
+                            "path": "app.py", "line": 3,
+                            "evidence_ids": ["read_file:defect"],
+                        }],
+                        "evidence_resolutions": [{
+                            "evidence_id": "read_file:defect", "status": "finding",
+                        }],
+                    },
+                    {
+                        "action": "final",
+                        "findings": [{
+                            "path": "app.py", "line": 2,
+                            "evidence_ids": [
+                                "read_file:defect",
+                                "protocol-finding:read_file:defect",
+                            ],
+                        }],
+                        "evidence_resolutions": [{
+                            "evidence_id": "read_file:defect", "status": "finding",
+                        }, {
+                            "evidence_id": "protocol-finding:read_file:defect",
+                            "status": "finding",
+                        }],
+                    },
+                ]
+
+            def complete_json(self, *_args, **_kwargs):
+                return self.actions.pop(0)
+
+        valid = {("app.py", 2)}
+
+        def validate(action):
+            finding = action["findings"][0]
+            if (finding["path"], finding["line"]) not in valid:
+                return "Anchor the Finding to the exact added line app.py:2."
+            return ""
+
+        result = BoundedRole(
+            "correctness-reliability", "Review.", SequencedClient(),
+            token_budget=4000, time_budget=30,
+            final_action_validator=validate,
+        ).run("{}", ToolRegistry([]), ExecutionLedger("agentic"))
+
+        self.assertEqual(2, result["_steps"])
+        self.assertEqual(2, result["findings"][0]["line"])
+        self.assertEqual("protocol-requirement", result["_observations"][-1]["tool"])
+        self.assertIn("app.py:2", result["_observations"][-1]["error"])
+        self.assertTrue(
+            result["_observations"][-1]["result"]["output"]["requires_resolution"]
+        )
+
+    def test_model_rule_normalization_corrects_exception_cwe_252_only(self):
+        raw = {
+            "rule_id": "CWE-252", "title": "Decoder raises TypeError",
+            "explanation": "A malformed value raises TypeError and crashes the request.",
+            "evidence": "value = decode(raw)",
+        }
+
+        self.assertEqual("CWE-248", _normalize_model_rule_id(raw))
+        raw.update({
+            "title": "Unchecked return status",
+            "explanation": "The caller fails to inspect the return code.",
+        })
+        self.assertEqual("CWE-252", _normalize_model_rule_id(raw))
+
+    def test_finding_location_recovers_only_from_unique_exact_added_evidence(self):
+        parsed = parse_unified_diff(
+            "--- a/app.py\n+++ b/app.py\n@@ -0,0 +1,2 @@\n"
+            "+prepare()\n+consume(value)\n"
+        )
+        result = {"findings": [{
+            "rule_id": "CWE-248", "severity": "medium",
+            "title": "Invalid value crashes", "explanation": "The call raises.",
+            "path": "app.py", "line": 99, "evidence": "consume(value)",
+            "fix": "Validate value.", "test": "Exercise invalid value.",
+        }]}
+
+        findings = _parse_findings(result, parsed, "correctness-reliability")
+
+        self.assertEqual(1, len(findings))
+        self.assertEqual(2, findings[0].line)
+
+    def test_worker_validation_rejects_any_unscoreable_structured_finding(self):
+        parsed = parse_unified_diff(
+            "--- a/app.py\n+++ b/app.py\n@@ -0,0 +1 @@\n+consume(value)\n"
+        )
+        result = {"findings": [{
+            "rule_id": "CWE-248", "path": "app.py", "line": 99,
+            "title": "Crash", "explanation": "The call crashes.",
+            "evidence": "a different expression",
+        }]}
+
+        error = _worker_final_validation_error(result, parsed)
+
+        self.assertIn("Rejected locations: app.py:99", error)
+        self.assertIn("app.py:1", error)
 
     def test_suggestion_metrics_measure_recovery_without_publishing_the_claim(self):
         suggestion = Finding(

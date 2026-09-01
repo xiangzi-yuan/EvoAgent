@@ -399,6 +399,86 @@ class RepositoryToolSuite:
                 "filesystem_read": False,
                 "arbitrary_code_executed": False,
             })
+        if kind == "dict-mutation-during-iteration":
+            values = {"remaining": "value"}
+            error_type = ""
+            try:
+                for key in values:
+                    values.pop(key)
+            except RuntimeError as exc:
+                error_type = type(exc).__name__
+            return _evidence("semantic_probe", {
+                "kind": kind,
+                "operation": "pop-current-key-while-iterating-dict",
+                "dict_size_change_raises": error_type == "RuntimeError",
+                "error_type": error_type,
+                "requires_resolution": True,
+                "resolution_question": (
+                    "Python raises RuntimeError when a dict changes size during iteration. "
+                    "Show that the added loop cannot pop from the iterated dict, or report it."
+                ),
+                "network_used": False,
+                "filesystem_read": False,
+                "arbitrary_code_executed": False,
+            })
+        if kind == "decimal-special-exponent":
+            from decimal import Decimal
+
+            values = []
+            for literal in ("NaN", "Infinity"):
+                exponent = Decimal(literal).as_tuple().exponent
+                error_type = ""
+                try:
+                    exponent >= 0
+                except TypeError as exc:
+                    error_type = type(exc).__name__
+                values.append({
+                    "literal": literal,
+                    "exponent": str(exponent),
+                    "exponent_type": type(exponent).__name__,
+                    "comparison_with_zero_raises": error_type == "TypeError",
+                    "error_type": error_type,
+                })
+            return _evidence("semantic_probe", {
+                "kind": kind,
+                "operation": "compare-special-decimal-exponents-with-zero",
+                "values": values,
+                "requires_resolution": True,
+                "resolution_question": (
+                    "Decimal NaN and Infinity expose non-integer exponent sentinels that "
+                    "raise TypeError when compared with zero. Show they are rejected before "
+                    "the added comparison, or report the changed line."
+                ),
+                "network_used": False,
+                "filesystem_read": False,
+                "arbitrary_code_executed": False,
+            })
+        if kind == "unhashable-exception-membership":
+            class UnhashableException(Exception):
+                __hash__ = None
+
+            value = UnhashableException("probe")
+            error_type = ""
+            try:
+                {value}
+            except TypeError as exc:
+                error_type = type(exc).__name__
+            return _evidence("semantic_probe", {
+                "kind": kind,
+                "operation": "insert-unhashable-exception-in-set",
+                "exception_hash_is_none": type(value).__hash__ is None,
+                "set_insertion_raises": error_type == "TypeError",
+                "error_type": error_type,
+                "requires_resolution": True,
+                "resolution_question": (
+                    "Python exception subclasses may disable hashing, and inserting such an "
+                    "instance into a set raises TypeError. Show the added set operation only "
+                    "receives hashable values, or report it."
+                ),
+                "network_used": False,
+                "filesystem_read": False,
+                "arbitrary_code_executed": False,
+            })
         if kind == "sentinel-error-propagation":
             missing = object()
             conversion_failed = False
@@ -700,6 +780,9 @@ class RepositoryToolSuite:
                                 "url-normalization-redaction",
                                 "tri-state-boolean",
                                 "nullable-length",
+                                "dict-mutation-during-iteration",
+                                "decimal-special-exponent",
+                                "unhashable-exception-membership",
                                 "sentinel-error-propagation",
                                 "serialization-exclusion-update",
                                 "equality-negation-contract",

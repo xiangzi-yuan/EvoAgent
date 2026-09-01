@@ -177,6 +177,15 @@ def _semantic_probe_supports_finding(item: dict, finding: Finding) -> bool:
         # This probe only proves lexical parent-segment escape after Join. It
         # does not create symlinks or exercise filesystem race/error branches.
         return False
+    if kind == "git-option-normalization" and any(
+        cue in claim for cue in (
+            "false positive", "incorrectly reject", "overly broad", "config-file",
+        )
+    ):
+        # This probe proves underscore-to-dash bypass behavior only. It does not
+        # prove that any configured unsafe option rejects a legitimate longer
+        # option by prefix.
+        return False
     cues = {
         "path-containment": ("cwe-22", "path traversal", "containment", "filepath"),
         "security-control-default": (
@@ -202,6 +211,15 @@ def _semantic_probe_supports_finding(item: dict, finding: Finding) -> bool:
         "self-cycle-collection": ("cycle", "garbage collect", "gc"),
         "alias-configuration-direction": (
             "validation_alias", "validate_by_alias", "alias",
+        ),
+        "dict-mutation-during-iteration": (
+            "dictionary changed size", "dict", "pop(", "runtimeerror",
+        ),
+        "decimal-special-exponent": (
+            "decimal", "nan", "infinity", "exponent", "typeerror",
+        ),
+        "unhashable-exception-membership": (
+            "unhashable", "exception", "set", "typeerror",
         ),
     }
     return kind in cues and any(cue in claim for cue in cues[kind])

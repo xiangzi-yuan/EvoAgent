@@ -179,7 +179,7 @@ def main() -> None:
         help="Run only this case id; repeat for multiple targeted diagnostics.",
     )
     parser.add_argument("--timeout", type=int, default=60)
-    parser.add_argument("--token-budget", type=int, default=16000)
+    parser.add_argument("--token-budget", type=int, default=64000)
     parser.add_argument("--time-budget", type=int, default=120)
     parser.add_argument(
         "--seed-report", action="append", default=[],
