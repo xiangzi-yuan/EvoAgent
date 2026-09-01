@@ -25,43 +25,8 @@ RUNTIME_ROOT = os.environ.get("EVOAGENT_BENCHMARK_RUNTIME_ROOT", ROOT)
 RUNTIME_JOIN = posixpath.join if RUNTIME_ROOT.startswith("/") else os.path.join
 
 
-SECURITY_CHECKOUTS = {
-    "python-apache-airflow-cve-2026-59243-regression": (
-        "output/all-13-repo-checkouts/airflow-risk-586e658e"
-    ),
-    "python-apache-airflow-cve-2026-59243-security-fix": (
-        "output/all-13-repo-checkouts/airflow-fixed-d15ac85a"
-    ),
-    "python-giskard-agents-cve-2026-34172-regression": (
-        "output/obvious-severe-checkouts/giskard-oss-fix"
-    ),
-    "python-giskard-agents-cve-2026-34172-security-fix": (
-        "output/all-13-repo-checkouts/giskard-fixed-afe574d0"
-    ),
-    "python-django-haystack-ghsa-r3hx-x5rh-p9vv-regression": (
-        "output/python-security-checkouts/django-haystack-fix"
-    ),
-    "python-django-haystack-ghsa-r3hx-x5rh-p9vv-security-fix": (
-        "output/all-13-repo-checkouts/haystack-fixed-eb05f193"
-    ),
-    "python-gitpython-cve-2026-42215-regression": (
-        "output/python-security-checkouts/gitpython-3.1.47"
-    ),
-    "python-gitpython-cve-2026-42215-security-fix": (
-        "output/all-13-repo-checkouts/gitpython-fixed-43d92dec"
-    ),
-}
-
-
 def relative_checkout(case: dict) -> str:
-    explicit = SECURITY_CHECKOUTS.get(case["id"])
-    if explicit:
-        return explicit
-    root = str(case.get("repository_root") or "").replace("\\", "/")
-    marker = "/output/"
-    if marker not in root:
-        raise ValueError("case %s has no reusable checkout path" % case["id"])
-    return "output/" + root.split(marker, 1)[1]
+    return "output/all-13-portable-checkouts/%s" % case["id"]
 
 
 def expected_repository_sha(case: dict) -> str:
