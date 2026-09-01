@@ -1,0 +1,136 @@
+{
+  "schema_version": 1,
+  "name": "python-three-repo-extension-v1",
+  "status": "completed-obvious-defect-pilot-with-one-degraded-clean-case",
+  "implementation_commit": "f4b202a8ecf0acddcbd9a2d820d61cb976bde95e",
+  "reviewed_at": "2026-09-01",
+  "purpose": "Independent three-repository check of obvious Python correctness review with real repository context and paired public-fix directions",
+  "dataset": {
+    "path": "benchmarks/python_three_repo_extension_v1.jsonl",
+    "builder": "scripts/build_python_three_repo_extension.py",
+    "file_sha256": "ed032dfb60c281b804b293ede5bd63519e94767e15e14fbe7776e47f0801bb42",
+    "normalized_sha256": "ee5a6a23c3d062a997107ee18a1d86a85857cab4c0321168004af19928a8ecba",
+    "cases": 6,
+    "families": 3,
+    "repositories": 3,
+    "risk_cases": 3,
+    "clean_fix_cases": 3,
+    "required_findings": 3,
+    "language": "python",
+    "repository_context_available_cases": 6
+  },
+  "sources": [
+    {
+      "repository": "pallets/click",
+      "pull_request": 3299,
+      "public_url": "https://github.com/pallets/click/pull/3299",
+      "vulnerable_sha": "04ef3a6f473deb2499721a8d11f92a7d2c0912f2",
+      "fixed_sha": "d340b0c1202284a1b9d0ca892549208527d586ce",
+      "defect": "help rendering invokes strict equality on an arbitrary non-string default"
+    },
+    {
+      "repository": "pallets/flask",
+      "pull_request": 6096,
+      "public_url": "https://github.com/pallets/flask/pull/6096",
+      "vulnerable_sha": "514fc6b3e8402e4c646d5284e97a4f0ab50a7c4b",
+      "fixed_sha": "7203feabf723edae0286ae5dc64fec8ac4c91735",
+      "defect": "partitioning SERVER_NAME at the first colon breaks bracketed IPv6 host and port parsing"
+    },
+    {
+      "repository": "sphinx-doc/sphinx",
+      "pull_request": 10183,
+      "public_url": "https://github.com/sphinx-doc/sphinx/pull/10183",
+      "vulnerable_sha": "b07ca9dbcc43f344f4aa15b970c0ce708f7b36a8",
+      "fixed_sha": "e1ea3bb53a7b043a70cef3356f9990b4e6bfd285",
+      "defect": "restify and stringify perform dictionary membership on an unhashable annotation"
+    }
+  ],
+  "configuration": {
+    "model_provider": "deepseek",
+    "model": "deepseek-v4-flash",
+    "base_url": "https://api.deepseek.com",
+    "roles": ["lead", "security", "correctness-reliability", "critic"],
+    "token_budget_per_pr": 64000,
+    "time_budget_seconds_per_pr": 180,
+    "request_timeout_seconds": 90,
+    "repository_execution": false,
+    "network_or_exploit_execution": false
+  },
+  "raw_model_run": {
+    "report": "output/python-three-repo-extension-v1/agentic/deepseek-v4-flash-f4b202a-round1.json",
+    "report_sha256": "b330acd0e56b1779d8995b65f7f2c217ead477b1edd601ee2891d053daa0af4b",
+    "dataset_normalized_sha256_before_label_review": "48346f3224247ae524c612c737b2044fab39235334414bba14298a9713f11994",
+    "cases": 6,
+    "execution_successes": 6,
+    "tp": 2,
+    "fp": 1,
+    "fn": 2,
+    "precision": 0.6667,
+    "recall": 0.5,
+    "f1": 0.5714,
+    "clean_accuracy": 1.0,
+    "llm_calls": 41,
+    "total_tokens": 279123,
+    "duration_seconds": 200.7873
+  },
+  "human_label_review": {
+    "model_called_again": false,
+    "click": "The only finding names the exact root cause at src/click/core.py:3113 with the correct fix and regression test. CWE-691 was added as an acceptable taxonomy because the original label rejected this otherwise exact match.",
+    "sphinx": "The finding explicitly covers both restify and stringify. The two line labels represented one shared root cause and were consolidated into one publication-ready review comment, matching the Coordinator's intended deduplication behavior.",
+    "reports_preserved": true
+  },
+  "reviewed_same_output": {
+    "report": "output/python-three-repo-extension-v1/agentic/deepseek-v4-flash-f4b202a-round1-reviewed.json",
+    "report_sha256": "0746d02739e28605e95f239204dabbebaa330019cee3a3d556c69ea7320224d4",
+    "cases": 6,
+    "execution_successes": 6,
+    "tp": 3,
+    "fp": 0,
+    "fn": 0,
+    "precision": 1.0,
+    "recall": 1.0,
+    "f1": 1.0,
+    "clean_accuracy": 1.0,
+    "evidence_accuracy": 1.0,
+    "exact_line_accuracy": 1.0,
+    "severity_accuracy": 0.6667,
+    "full_role_success_rate": 0.8333,
+    "degraded_execution_rate": 0.1667,
+    "llm_calls": 41,
+    "total_tokens": 279123
+  },
+  "findings": [
+    {
+      "repository": "pallets/click",
+      "path": "src/click/core.py",
+      "line": 3113,
+      "severity": "medium",
+      "rule_id": "CWE-691",
+      "result": "required defect found; paired public fix silent"
+    },
+    {
+      "repository": "pallets/flask",
+      "path": "src/flask/app.py",
+      "line": 724,
+      "severity": "high",
+      "rule_id": "CWE-20",
+      "result": "required defect found; paired public fix silent"
+    },
+    {
+      "repository": "sphinx-doc/sphinx",
+      "path": "sphinx/util/typing.py",
+      "line": 377,
+      "severity": "medium",
+      "rule_id": "CWE-248",
+      "result": "consolidated required defect found; paired public fix silent"
+    }
+  ],
+  "limitations": [
+    "These are deliberately selected obvious public bug fixes and are not an unbiased estimate of arbitrary PR-review accuracy.",
+    "Each risk record transparently reverses a public fix; it is not presented as the original PR direction.",
+    "This is one model run across exactly three new repositories, not a repeated stability gate.",
+    "The raw and reviewed metrics differ only because two human label-design problems were corrected after inspecting the findings; the original report remains preserved.",
+    "The Flask clean-fix case completed with no Finding, but one correctness-reliability assignment exhausted its role budget, so full-role success was 83.33% rather than 100%.",
+    "Repository source was readable in all six cases, but repository tests and arbitrary commands were not executed."
+  ]
+}

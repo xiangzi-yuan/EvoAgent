@@ -1,7 +1,7 @@
 {
   "schema_version": 2,
   "name": "python-interview-canary-20-v1",
-  "status": "passed-uniform-stability-gate",
+  "status": "stability-regression-observed-on-third-run",
   "implementation_commit": "deb3db1629450799cbc8471701712aee2ac0fcaf",
   "reviewed_at": "2026-09-01",
   "purpose": "Selected Python PR gate for obvious security and correctness regressions plus their clean public-fix directions",
@@ -98,19 +98,48 @@
       "llm_calls": 114,
       "total_tokens": 391828,
       "duration_seconds": 254.5014
+    },
+    {
+      "round": 3,
+      "report": "output/python-interview-canary-20-v1/agentic/uniform-f4b202a-round3.json",
+      "report_sha256": "383f053334b44207925b1838e1172945bc3afc19150941724db7f61623b9a214",
+      "uniform_final_commit_execution": true,
+      "cases": 20,
+      "tp": 9,
+      "fp": 2,
+      "fn": 1,
+      "precision": 0.8182,
+      "recall": 0.9,
+      "f1": 0.8572,
+      "high_risk_recall": 1.0,
+      "clean_accuracy": 0.9,
+      "evidence_accuracy": 1.0,
+      "exact_line_accuracy": 1.0,
+      "severity_accuracy": 0.6667,
+      "execution_success_rate": 1.0,
+      "full_role_success_rate": 1.0,
+      "degraded_execution_rate": 0.0,
+      "llm_calls": 120,
+      "total_tokens": 433041,
+      "duration_seconds": 284.983,
+      "differences": [
+        "pytest PR 13086 risk replay was missed",
+        "GitPython PR 2131 public fix direction received one false positive",
+        "SQLModel PR 997 produced two comments for one root cause, counted as one TP and one duplicate-shaped FP"
+      ]
     }
   ],
   "stability_summary": {
-    "rounds": 2,
-    "evaluated_case_runs": 40,
-    "identical_case_outcomes": 20,
-    "case_outcome_repeatability": 1.0,
-    "risk_detection_repeatability": 1.0,
-    "clean_silence_repeatability": 1.0,
-    "aggregate_llm_calls": 234,
-    "aggregate_total_tokens": 825347,
-    "aggregate_duration_seconds": 539.734,
-    "conclusion": "Both fresh uniform runs from the same immutable commit and configuration produced TP=10, FP=0 and FN=0 with complete four-role execution."
+    "rounds": 3,
+    "evaluated_case_runs": 60,
+    "identical_case_outcomes_across_all_rounds": 17,
+    "case_outcome_repeatability": 0.85,
+    "risk_case_detection_rate": 0.9667,
+    "clean_fix_silence_rate": 0.9667,
+    "aggregate_llm_calls": 354,
+    "aggregate_total_tokens": 1258388,
+    "aggregate_duration_seconds": 824.717,
+    "conclusion": "The first two runs were perfect, but the third identical-configuration run was TP=9, FP=2 and FN=1. The 20-case set therefore demonstrates strong obvious-defect performance but does not satisfy a three-run perfect-stability claim."
   },
   "superseded_checkpoint": {
     "implementation_commit": "d7d092e294fc77f07651d691bf7a833b1893fdf1",
@@ -122,7 +151,8 @@
     "The four security risk records transparently reverse public security fixes; the six correctness risk records transparently reverse public bug fixes.",
     "The exact-line score is 90% because one matched finding points to the adjacent line in the same defect block.",
     "Severity classification remains weaker than defect detection: the two runs scored 80% and 70% severity accuracy while all required defects were found.",
-    "Repository tests and scanners were not executed during these benchmark runs; findings relied on repository context, bounded side-effect-free semantic probes, reviewer agreement and publication gates.",
+    "Repository tests and scanners were not executed during these benchmark runs.",
+    "The legacy 20-case JSONL embeds Windows checkout paths, so all three Linux-container runs reported repository_context.available=false and evaluated Diff plus bounded semantic probes rather than full repository reads. The three-repository extension fixes this path issue and records repository context separately.",
     "Broader languages, subtle long-range business invariants and unbiased real-world prevalence remain outside this checkpoint."
   ]
 }

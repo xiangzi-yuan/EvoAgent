@@ -239,9 +239,15 @@ GitPython 案例使用固定的 `git-option-normalization` 探针对比 `upload_
 
 `benchmarks/python_interview_canary_20_v1.jsonl` 把目标收窄为“明显主缺陷必须发现、对应修复不能误报”：10 个 Python PR 家族各有一条缺陷回放和一条公开修复方向，共 20 条。除四组安全案例外，普通正确性案例覆盖迭代时修改字典、目录消失异常、空 netrc 凭据、Decimal 特殊值、不可哈希异常和异常清理遗漏。
 
-最终提交 `deb3db1` 已在同一 DeepSeek V4 Flash、相同 64000 tokens/PR 与 180 秒/PR 配置上，从零统一执行两轮。两轮各自均为 20/20 执行成功、四角色成功率 100%、TP=10、FP=0、FN=0，Precision/Recall/F1 均为 100%；10/10 明显缺陷重复命中，10/10 公开修复方向重复静默，20 个案例的两轮结果一致率为 100%。两轮证据准确率均为 100%，精确行准确率均为 90%，严重等级准确率分别为 80% 和 70%。
+最终实现已在同一 DeepSeek V4 Flash、相同 64000 tokens/PR 与 180 秒/PR 配置上从零统一执行三轮。前两轮各自都是 TP=10、FP=0、FN=0；第三轮为 TP=9、FP=2、FN=1，漏掉 pytest 的目录消失异常，在 GitPython 修复方向产生一条误报，并把 SQLModel 同一根因重复发布为两条。因此不能再宣称 20 条达到三轮 100% 稳定：三轮风险案例命中率和干净修复静默率均为 96.67%，17/20 案例在三轮中保持完全相同的 TP/FP/FN 结果。
 
-18 条本地规则在同一数据集只命中 3/10 缺陷，Recall 30%，说明其余结果来自 Agent 的仓库语义审查、固定无副作用语义探针、Lead/Critic 协作和发布门禁，而不是简单正则记忆。两轮合计 234 次模型调用、825347 tokens；机器可读报告、SHA-256、预算和限制见 `benchmarks/python_interview_canary_20_v1_baseline.json`。这是有意筛选的“明显缺陷”稳定性 Canary，不能外推为任意真实 PR 的 100% 准确率，也不覆盖隐蔽的跨模块业务逻辑和其他语言。
+18 条本地规则在同一数据集只命中 3/10 缺陷，Recall 30%，说明模型协作和无副作用语义探针确实贡献了额外召回，而不是简单正则记忆。审计同时发现旧 JSONL 写入了 Windows checkout 绝对路径，Linux 容器三轮均显示 `repository_context.available=false`，所以这 20 条实际验证的是 Diff、固定语义探针、Lead/Critic 协作和发布门禁，不能用来证明全仓库读取效果。三轮合计 354 次模型调用、1258388 tokens；机器可读报告、SHA-256、预算和限制见 `benchmarks/python_interview_canary_20_v1_baseline.json`。
+
+### Python 三仓库上下文扩展
+
+`benchmarks/python_three_repo_extension_v1.jsonl` 新增 Click #3299、Flask #6096 和 Sphinx #10183 三个普通正确性缺陷，并为每个缺陷保留对应公开修复方向，共 6 条。容器内 6/6 仓库快照均可读取，Agent 的证据中实际出现了 `read_file`、`search_repository` 和 `changed_line`。
+
+一次 DeepSeek V4 Flash 四角色实跑中，三个缺陷家族均形成了定位到新增行、包含根因、修复和测试建议的 Finding，三个公开修复方向全部静默。原始自动分数为 TP=2、FP=1、FN=2；人工复核发现 Click 只是 CWE 可接受集合漏掉了模型给出的 `CWE-691`，Sphinx 则把一个已合并发布的共同根因错误拆成两个必需评论。修正标签后使用同一缓存输出重算为 TP=3、FP=0、FN=0，未再次调用模型。Flask 干净方向有一个 Reviewer 子任务耗尽预算，因此全角色成功率为 83.33%，这是本轮明确保留的稳定性警告。完整原始报告、复核理由和限制见 `benchmarks/python_three_repo_extension_v1_baseline.json`。
 
 ### 统一 10 案例家族回归
 
