@@ -493,12 +493,24 @@ def _resolve_finding_location(raw: dict, parsed: ParsedDiff) -> Optional[tuple]:
 def _normalize_model_rule_id(raw: dict) -> str:
     """Correct one narrow, auditable CWE mismatch while preserving the raw ID."""
     rule_id = normalize_rule_id(str(raw.get("rule_id", "LLM-OTHER")))
-    if rule_id != "CWE-252":
-        return rule_id
     claim = " ".join((
         str(raw.get("title", "")), str(raw.get("explanation", "")),
         str(raw.get("evidence", "")),
     )).lower()
+    if rule_id == "CWE-697" and all((
+        any(cue in claim for cue in (
+            "canonical", "underscore", "dash", "upload_pack", "upload-pack",
+        )),
+        any(cue in claim for cue in (
+            "bypass", "false negative", "not match", "fails to match",
+        )),
+        any(cue in claim for cue in (
+            "unsafe option", "unsafe_options", "upload_pack", "upload-pack",
+        )),
+    )):
+        return "CWE-184"
+    if rule_id != "CWE-252":
+        return rule_id
     exception_cues = (
         "exception", "typeerror", "keyerror", "runtimeerror",
         "unboundlocalerror", "raises", "crash",
@@ -1610,6 +1622,13 @@ class ModeRouterReviewer(Reviewer):
             token in lowered for token in ("exc_value", "exception")
         ):
             probe_kinds.append("unhashable-exception-membership")
+        if (
+            re.search(r"(?m)^\s*with\s+os\.scandir\s*\(", semantic_text)
+            and "except filenotfounderror" not in lowered
+        ):
+            probe_kinds.append("scandir-missing-directory")
+        if re.search(r"(?m)^\s*if\s+_netrc\s*:\s*$", semantic_text):
+            probe_kinds.append("empty-netrc-credentials")
         if selected and "semantic_probe" in tools.names():
             for kind in probe_kinds[:3]:
                 try:
@@ -1921,7 +1940,7 @@ class ModeRouterReviewer(Reviewer):
                 reasons.append(
                     "low-severity model finding remains advisory"
                 )
-            if finding.confidence < 0.8:
+            if finding.confidence + 1e-9 < 0.8:
                 reasons.append(
                     "model confidence below stable publication threshold 0.80"
                 )
@@ -2104,9 +2123,25 @@ class ModeRouterReviewer(Reviewer):
                 else 1 if current is not None and is_validated_agent_skill_finding(current)
                 else 0
             )
+            claim_supported = bool(
+                claim_specific_high_risk_evidence_refs(finding)
+            )
+            current_claim_supported = bool(
+                current is not None
+                and claim_specific_high_risk_evidence_refs(current)
+            )
             if (
                 current is None or priority > current_priority
-                or (priority == current_priority and finding.confidence > current.confidence)
+                or (
+                    priority == current_priority
+                    and claim_supported
+                    and not current_claim_supported
+                )
+                or (
+                    priority == current_priority
+                    and claim_supported == current_claim_supported
+                    and finding.confidence > current.confidence
+                )
             ):
                 if current is not None:
                     known = {

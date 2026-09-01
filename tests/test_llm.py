@@ -50,6 +50,33 @@ class JsonChatClientTests(unittest.TestCase):
         self.assertEqual("final", client.complete_json("lead", "system", "task")["action"])
         self.assertEqual(1, urlopen.call_count)
 
+    @mock.patch("evoagent.llm.urllib.request.urlopen")
+    def test_concatenated_json_objects_keep_first_action_and_are_audited(self, urlopen):
+        urlopen.return_value = FakeResponse(
+            '{"action":"final","findings":[]} {"duplicate":true}'
+        )
+        ledger = ExecutionLedger("test")
+        client = JsonChatClient("https://example.test", "secret", "model")
+
+        result = client.complete_json("lead", "system", "task", ledger)
+
+        self.assertEqual("final", result["action"])
+        self.assertEqual(1, urlopen.call_count)
+        events = ledger.summary()["agent_traces"]["lead"]
+        self.assertEqual("structured_json_extra_values_ignored", events[0]["event"])
+        self.assertEqual(1, events[0]["trailing_values"])
+
+    @mock.patch("evoagent.llm.urllib.request.urlopen")
+    def test_json_with_trailing_prose_is_still_retried(self, urlopen):
+        urlopen.side_effect = [
+            FakeResponse('{"action":"final"} explanation'),
+            FakeResponse('{"action":"final"}'),
+        ]
+        client = JsonChatClient("https://example.test", "secret", "model")
+
+        self.assertEqual("final", client.complete_json("lead", "system", "task")["action"])
+        self.assertEqual(2, urlopen.call_count)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -221,6 +221,13 @@ def _semantic_probe_supports_finding(item: dict, finding: Finding) -> bool:
         "unhashable-exception-membership": (
             "unhashable", "exception", "set", "typeerror",
         ),
+        "scandir-missing-directory": (
+            "scandir", "filenotfounderror", "missing directory",
+            "directory disappeared", "directory removed",
+        ),
+        "empty-netrc-credentials": (
+            "netrc", "empty credentials", "blank credentials", "tuple",
+        ),
     }
     return kind in cues and any(cue in claim for cue in cues[kind])
 

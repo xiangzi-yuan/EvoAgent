@@ -338,6 +338,12 @@ class AgenticEvaluationTests(unittest.TestCase):
         unhashable_exception = RepositoryToolSuite.semantic_probe(
             "unhashable-exception-membership"
         )["output"]
+        missing_scandir = RepositoryToolSuite.semantic_probe(
+            "scandir-missing-directory"
+        )["output"]
+        empty_netrc = RepositoryToolSuite.semantic_probe(
+            "empty-netrc-credentials"
+        )["output"]
 
         self.assertTrue(serialization["excluded_field_update_lost"])
         self.assertTrue(equality["contract_violated"])
@@ -372,6 +378,10 @@ class AgenticEvaluationTests(unittest.TestCase):
             for item in decimal_exponent["values"]
         ))
         self.assertTrue(unhashable_exception["set_insertion_raises"])
+        self.assertTrue(missing_scandir["scandir_open_raises"])
+        self.assertTrue(empty_netrc["tuple_is_truthy"])
+        self.assertFalse(empty_netrc["any_field_is_truthy"])
+        self.assertTrue(empty_netrc["blank_credentials_pass_tuple_truthiness"])
         self.assertTrue(all(
             item["arbitrary_code_executed"] is False
             for item in (
@@ -379,8 +389,52 @@ class AgenticEvaluationTests(unittest.TestCase):
                 security_default, workflow_expression, git_option,
                 nullable_length, sentinel, module_getattr,
                 dict_mutation, decimal_exponent, unhashable_exception,
+                missing_scandir, empty_netrc,
             )
         ))
+
+    def test_preflight_probes_missing_scandir_and_blank_netrc_only_on_regressions(self):
+        class RecordingTools:
+            def __init__(self):
+                self.calls = []
+
+            def names(self):
+                return ["semantic_probe"]
+
+            def invoke(self, name, arguments):
+                self.calls.append((name, dict(arguments)))
+                return RepositoryToolSuite.semantic_probe(arguments["kind"])
+
+        risk = parse_unified_diff(
+            "--- a/app.py\n+++ b/app.py\n@@ -1 +1,2 @@\n"
+            "+with os.scandir(path) as entries:\n+    consume(entries)\n"
+            "--- a/auth.py\n+++ b/auth.py\n@@ -1 +1 @@\n+if _netrc:\n"
+        )
+        clean = parse_unified_diff(
+            "--- a/app.py\n+++ b/app.py\n@@ -1 +1,4 @@\n"
+            "+try:\n+    entries = os.scandir(path)\n+except FileNotFoundError:\n+    return []\n"
+            "--- a/auth.py\n+++ b/auth.py\n@@ -1 +1 @@\n"
+            "+if _netrc and any(_netrc):\n"
+        )
+        risk_tools = RecordingTools()
+        clean_tools = RecordingTools()
+
+        ModeRouterReviewer._repository_preflight(
+            {"files": risk.files}, risk, risk_tools, repository_available=False,
+        )
+        ModeRouterReviewer._repository_preflight(
+            {"files": clean.files}, clean, clean_tools, repository_available=False,
+        )
+
+        self.assertIn(
+            ("semantic_probe", {"kind": "scandir-missing-directory"}),
+            risk_tools.calls,
+        )
+        self.assertIn(
+            ("semantic_probe", {"kind": "empty-netrc-credentials"}),
+            risk_tools.calls,
+        )
+        self.assertEqual([], clean_tools.calls)
 
     def test_repository_preflight_reads_distinct_regions_and_probes_nullable_len(self):
         class RecordingTools:
@@ -500,6 +554,48 @@ class AgenticEvaluationTests(unittest.TestCase):
         ]
 
         self.assertEqual(1, len(ModeRouterReviewer._merge(values)))
+
+    def test_semantic_merge_prefers_the_claim_actually_proved_by_probe(self):
+        shared_ref = {
+            "evidence_id": "semantic_probe:git",
+            "tool": "semantic_probe",
+            "output": {
+                "kind": "git-option-normalization",
+                "dangerous_flag_emitted_after_raw_check": True,
+                "arbitrary_code_executed": False,
+            },
+        }
+        mixed = Finding(
+            rule_id="CWE-184", severity=Severity.HIGH,
+            title="Unsafe option bypass and false positive for --config-file",
+            explanation=(
+                "Underscore normalization bypasses the check, and prefix matching "
+                "may incorrectly reject --config-file."
+            ),
+            path="git/cmd.py", line=959,
+            evidence="if option.startswith(unsafe_option):",
+            evidence_refs=[shared_ref], fix="Canonicalize names.",
+            test="Cover upload_pack.", confidence=0.95,
+            source="correctness-reliability",
+        )
+        proved = Finding(
+            rule_id="CWE-184", severity=Severity.HIGH,
+            title="Unsafe upload_pack option bypasses canonical check",
+            explanation=(
+                "The raw underscore name fails to match before canonicalization, "
+                "so the dangerous upload-pack option bypasses the guard."
+            ),
+            path="git/cmd.py", line=959,
+            evidence="if option.startswith(unsafe_option):",
+            evidence_refs=[shared_ref], fix="Canonicalize names.",
+            test="Cover upload_pack.", confidence=0.9, source="security",
+        )
+
+        merged = ModeRouterReviewer._merge([mixed, proved])
+
+        self.assertEqual(1, len(merged))
+        self.assertEqual("security", merged[0].source)
+        self.assertIn("bypasses canonical", merged[0].title)
 
     def test_same_repository_evidence_and_similar_title_are_deduplicated(self):
         values = [
@@ -768,6 +864,24 @@ class AgenticEvaluationTests(unittest.TestCase):
             "explanation": "The caller fails to inspect the return code.",
         })
         self.assertEqual("CWE-252", _normalize_model_rule_id(raw))
+
+    def test_model_rule_normalization_corrects_git_option_bypass_cwe_697(self):
+        raw = {
+            "rule_id": "CWE-697",
+            "title": "Unsafe option false negative for underscore names",
+            "explanation": (
+                "The raw upload_pack name fails to match --upload-pack before "
+                "canonical dash normalization, allowing a guard bypass."
+            ),
+            "evidence": "if option.startswith(unsafe_option):",
+        }
+
+        self.assertEqual("CWE-184", _normalize_model_rule_id(raw))
+        raw.update({
+            "title": "Unrelated incorrect comparison",
+            "explanation": "Two ordinary values compare incorrectly.",
+        })
+        self.assertEqual("CWE-697", _normalize_model_rule_id(raw))
 
     def test_finding_location_recovers_only_from_unique_exact_added_evidence(self):
         parsed = parse_unified_diff(

@@ -255,6 +255,25 @@ class FindingPolicyTests(unittest.TestCase):
             decisions[0]["reasons"],
         )
 
+    def test_exact_stable_confidence_threshold_survives_float_subtraction(self):
+        candidate = finding()
+        candidate.confidence = 0.85 - 0.05
+        candidate.evidence_refs = [{
+            "evidence_id": "read_file:1234",
+            "tool": "read_file",
+            "output": {"path": "app.py", "content": "dangerous(value)"},
+        }]
+
+        published, suggestions, decisions = ModeRouterReviewer._partition_publication(
+            [], [candidate], [candidate],
+            [{"finding_index": 0, "publication_ready": True}],
+            repository_available=True,
+        )
+
+        self.assertEqual([candidate], published)
+        self.assertEqual([], suggestions)
+        self.assertEqual("confirmed", decisions[0]["disposition"])
+
     def test_same_line_repository_search_cannot_prove_high_risk_behavior(self):
         candidate = finding(severity=Severity.HIGH)
         candidate.evidence_refs = [{

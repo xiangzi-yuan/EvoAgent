@@ -4,9 +4,35 @@ import socket
 import time
 import urllib.error
 import urllib.request
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from .telemetry import ExecutionLedger
+
+
+def _decode_json_object(candidate: str) -> Tuple[Dict[str, Any], int]:
+    """Decode one object and tolerate only concatenated, valid JSON values.
+
+    Some compatible providers occasionally append a second JSON object despite
+    structured-output instructions. The first complete object is the role
+    action. Arbitrary trailing prose remains an error.
+    """
+    try:
+        result = json.loads(candidate)
+        trailing_values = 0
+    except json.JSONDecodeError as exc:
+        if "Extra data" not in str(exc):
+            raise
+        decoder = json.JSONDecoder()
+        result, offset = decoder.raw_decode(candidate)
+        remainder = candidate[offset:].strip()
+        trailing_values = 0
+        while remainder:
+            _ignored, offset = decoder.raw_decode(remainder)
+            trailing_values += 1
+            remainder = remainder[offset:].strip()
+    if not isinstance(result, dict):
+        raise ValueError("model JSON root is not an object")
+    return result, trailing_values
 
 
 class JsonChatClient:
@@ -81,9 +107,7 @@ class JsonChatClient:
                 elif candidate.startswith("```") and candidate.endswith("```"):
                     candidate = candidate[3:-3].strip()
                 try:
-                    result = json.loads(candidate)
-                    if not isinstance(result, dict):
-                        raise ValueError("model JSON root is not an object")
+                    result, trailing_values = _decode_json_object(candidate)
                 except (ValueError, TypeError, json.JSONDecodeError) as exc:
                     message = "%s JSON request failed: %s" % (self.provider, exc)
                     if ledger:
@@ -107,6 +131,11 @@ class JsonChatClient:
                         ]
                         continue
                     raise RuntimeError(message)
+                if ledger and trailing_values:
+                    ledger.trace(
+                        role, "structured_json_extra_values_ignored",
+                        trailing_values=trailing_values,
+                    )
                 if ledger:
                     ledger.record_model(
                         role, self.provider, self.model, body.get("usage") or {},

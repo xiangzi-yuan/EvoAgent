@@ -479,6 +479,52 @@ class RepositoryToolSuite:
                 "filesystem_read": False,
                 "arbitrary_code_executed": False,
             })
+        if kind == "scandir-missing-directory":
+            def missing_scandir(_path):
+                raise FileNotFoundError("probe directory disappeared")
+
+            error_type = ""
+            try:
+                with missing_scandir("missing") as entries:
+                    list(entries)
+            except FileNotFoundError as exc:
+                error_type = type(exc).__name__
+            return _evidence("semantic_probe", {
+                "kind": kind,
+                "operation": "propagate-scandir-open-error-without-handler",
+                "scandir_open_raises": error_type == "FileNotFoundError",
+                "error_type": error_type,
+                "requires_resolution": True,
+                "resolution_question": (
+                    "Opening a directory can raise FileNotFoundError before the context "
+                    "manager is entered. Show that the added direct os.scandir call catches "
+                    "that race, or report its exact changed line."
+                ),
+                "network_used": False,
+                "filesystem_read": False,
+                "arbitrary_code_executed": False,
+            })
+        if kind == "empty-netrc-credentials":
+            credentials = ("", "", "")
+            return _evidence("semantic_probe", {
+                "kind": kind,
+                "operation": "compare-tuple-truthiness-with-field-truthiness",
+                "credentials": list(credentials),
+                "tuple_is_truthy": bool(credentials),
+                "any_field_is_truthy": any(credentials),
+                "blank_credentials_pass_tuple_truthiness": (
+                    bool(credentials) and not any(credentials)
+                ),
+                "requires_resolution": True,
+                "resolution_question": (
+                    "A non-empty tuple of blank netrc fields is truthy even though every "
+                    "credential field is empty. Show that the added tuple-only check rejects "
+                    "this value, or report its exact changed line."
+                ),
+                "network_used": False,
+                "filesystem_read": False,
+                "arbitrary_code_executed": False,
+            })
         if kind == "sentinel-error-propagation":
             missing = object()
             conversion_failed = False
@@ -783,6 +829,8 @@ class RepositoryToolSuite:
                                 "dict-mutation-during-iteration",
                                 "decimal-special-exponent",
                                 "unhashable-exception-membership",
+                                "scandir-missing-directory",
+                                "empty-netrc-credentials",
                                 "sentinel-error-propagation",
                                 "serialization-exclusion-update",
                                 "equality-negation-contract",
