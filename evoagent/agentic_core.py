@@ -1813,12 +1813,14 @@ class ModeRouterReviewer(Reviewer):
                 )
             }
             publication_ready = accepted and all(verification.values())
+            recommended_adjustment = 0.0
             if decision:
                 try:
-                    adjustment = float(decision.get("confidence_adjustment", 0))
+                    recommended_adjustment = float(
+                        decision.get("confidence_adjustment", 0)
+                    )
                 except (TypeError, ValueError):
-                    adjustment = 0.0
-                finding.confidence = max(0.0, min(1.0, finding.confidence + adjustment))
+                    recommended_adjustment = 0.0
                 finding.evidence_refs.extend(
                     evidence[str(value)]
                     for value in decision.get("supporting_evidence_ids") or []
@@ -1827,6 +1829,7 @@ class ModeRouterReviewer(Reviewer):
             decisions.append({
                 "finding_index": index, "accepted": accepted,
                 "publication_ready": publication_ready,
+                "recommended_confidence_adjustment": recommended_adjustment,
                 **verification,
                 "objections": (decision or {}).get(
                     "objections", ["critic returned no explicit decision"]

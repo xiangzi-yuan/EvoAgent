@@ -727,6 +727,35 @@ class AgenticEvaluationTests(unittest.TestCase):
         self.assertEqual("security", merged[0].source)
         self.assertIn("bypasses canonical", merged[0].title)
 
+    def test_critic_recommends_but_does_not_double_apply_confidence_adjustment(self):
+        candidate = Finding(
+            rule_id="CWE-703", severity=Severity.MEDIUM,
+            title="Missing directory escapes", explanation="The error propagates.",
+            path="app.py", line=10, evidence="with os.scandir(path):",
+            fix="Catch FileNotFoundError.", test="Cover a missing directory.",
+            confidence=0.8, source="correctness-reliability",
+        )
+        result = {
+            "decisions": [{
+                "finding_index": 0,
+                "accepted": True,
+                "introduced_by_diff": True,
+                "reproducible": True,
+                "evidence_sufficient": True,
+                "would_comment_on_real_pr": True,
+                "confidence_adjustment": -0.05,
+            }],
+            "_observations": [],
+        }
+
+        candidates, decisions = ModeRouterReviewer._apply_critic(
+            result, [candidate],
+        )
+
+        self.assertEqual(0.8, candidates[0].confidence)
+        self.assertEqual(-0.05, decisions[0]["recommended_confidence_adjustment"])
+        self.assertTrue(decisions[0]["publication_ready"])
+
     def test_same_repository_evidence_and_similar_title_are_deduplicated(self):
         values = [
             Finding(
