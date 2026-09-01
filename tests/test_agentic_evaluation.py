@@ -344,6 +344,9 @@ class AgenticEvaluationTests(unittest.TestCase):
         empty_netrc = RepositoryToolSuite.semantic_probe(
             "empty-netrc-credentials"
         )["output"]
+        exception_cleanup = RepositoryToolSuite.semantic_probe(
+            "exception-cleanup-state"
+        )["output"]
 
         self.assertTrue(serialization["excluded_field_update_lost"])
         self.assertTrue(equality["contract_violated"])
@@ -382,6 +385,8 @@ class AgenticEvaluationTests(unittest.TestCase):
         self.assertTrue(empty_netrc["tuple_is_truthy"])
         self.assertFalse(empty_netrc["any_field_is_truthy"])
         self.assertTrue(empty_netrc["blank_credentials_pass_tuple_truthiness"])
+        self.assertTrue(exception_cleanup["state_remains_installed"])
+        self.assertEqual("RuntimeError", exception_cleanup["error_type"])
         self.assertTrue(all(
             item["arbitrary_code_executed"] is False
             for item in (
@@ -389,9 +394,44 @@ class AgenticEvaluationTests(unittest.TestCase):
                 security_default, workflow_expression, git_option,
                 nullable_length, sentinel, module_getattr,
                 dict_mutation, decimal_exponent, unhashable_exception,
-                missing_scandir, empty_netrc,
+                missing_scandir, empty_netrc, exception_cleanup,
             )
         ))
+
+    def test_preflight_probes_exception_cleanup_only_without_added_handler(self):
+        class RecordingTools:
+            def __init__(self):
+                self.calls = []
+
+            def names(self):
+                return ["semantic_probe"]
+
+            def invoke(self, name, arguments):
+                self.calls.append((name, dict(arguments)))
+                return RepositoryToolSuite.semantic_probe(arguments["kind"])
+
+        risk = parse_unified_diff(
+            "--- a/live.py\n+++ b/live.py\n@@ -1 +1 @@\n+self.refresh()\n"
+        )
+        clean = parse_unified_diff(
+            "--- a/live.py\n+++ b/live.py\n@@ -1 +1,4 @@\n"
+            "+try:\n+    self.refresh()\n+except Exception:\n+    self.stop()\n"
+        )
+        risk_tools = RecordingTools()
+        clean_tools = RecordingTools()
+
+        ModeRouterReviewer._repository_preflight(
+            {"files": risk.files}, risk, risk_tools, repository_available=False,
+        )
+        ModeRouterReviewer._repository_preflight(
+            {"files": clean.files}, clean, clean_tools, repository_available=False,
+        )
+
+        self.assertEqual(
+            [("semantic_probe", {"kind": "exception-cleanup-state"})],
+            risk_tools.calls,
+        )
+        self.assertEqual([], clean_tools.calls)
 
     def test_preflight_probes_missing_scandir_and_blank_netrc_only_on_regressions(self):
         class RecordingTools:
@@ -554,6 +594,37 @@ class AgenticEvaluationTests(unittest.TestCase):
         ]
 
         self.assertEqual(1, len(ModeRouterReviewer._merge(values)))
+
+    def test_same_semantic_probe_deduplicates_adjacent_lines_of_one_defect(self):
+        shared_ref = {
+            "evidence_id": "semantic_probe:dict-mutation",
+            "tool": "semantic_probe",
+            "output": {
+                "kind": "dict-mutation-during-iteration",
+                "dict_size_change_raises": True,
+                "arbitrary_code_executed": False,
+            },
+        }
+        values = [
+            Finding(
+                rule_id="CWE-703", severity=Severity.MEDIUM,
+                title="Dictionary changes size during iteration",
+                explanation="The loop pops from the dictionary it iterates.",
+                path="app.py", line=line, evidence=evidence,
+                evidence_refs=[shared_ref], fix="Iterate over a copy.",
+                test="Exercise one remaining key.", confidence=confidence,
+                source=source,
+            )
+            for line, evidence, confidence, source in (
+                (10, "for key in values:", 0.9, "security"),
+                (12, "values.pop(key)", 0.95, "correctness-reliability"),
+            )
+        ]
+
+        merged = ModeRouterReviewer._merge(values)
+
+        self.assertEqual(1, len(merged))
+        self.assertEqual(12, merged[0].line)
 
     def test_semantic_merge_prefers_the_claim_actually_proved_by_probe(self):
         shared_ref = {

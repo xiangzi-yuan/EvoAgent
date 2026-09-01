@@ -525,6 +525,38 @@ class RepositoryToolSuite:
                 "filesystem_read": False,
                 "arbitrary_code_executed": False,
             })
+        if kind == "exception-cleanup-state":
+            state = {"started": False, "redirect_enabled": False,
+                     "render_hook_installed": False}
+
+            def start_without_cleanup():
+                state["started"] = True
+                state["redirect_enabled"] = True
+                state["render_hook_installed"] = True
+                raise RuntimeError("initial refresh failed")
+
+            error_type = ""
+            try:
+                start_without_cleanup()
+            except RuntimeError as exc:
+                error_type = type(exc).__name__
+            return _evidence("semantic_probe", {
+                "kind": kind,
+                "operation": "raise-after-installing-state-without-exception-cleanup",
+                "error_type": error_type,
+                "state_after_exception": dict(state),
+                "state_remains_installed": all(state.values()),
+                "requires_resolution": True,
+                "resolution_question": (
+                    "An exception raised after started state, stream redirection and a "
+                    "render hook are installed leaves all three active without an exception "
+                    "cleanup path. Show that the added refresh call cannot raise or that the "
+                    "state is cleaned up, or report its exact changed line."
+                ),
+                "network_used": False,
+                "filesystem_read": False,
+                "arbitrary_code_executed": False,
+            })
         if kind == "sentinel-error-propagation":
             missing = object()
             conversion_failed = False

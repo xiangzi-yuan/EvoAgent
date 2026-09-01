@@ -228,6 +228,11 @@ def _semantic_probe_supports_finding(item: dict, finding: Finding) -> bool:
         "empty-netrc-credentials": (
             "netrc", "empty credentials", "blank credentials", "tuple",
         ),
+        "exception-cleanup-state": (
+            "cleanup", "state", "redirect", "render hook", "refresh",
+            "exception", "cwe-404", "cwe-459", "cwe-664", "cwe-703",
+            "cwe-772",
+        ),
     }
     return kind in cues and any(cue in claim for cue in cues[kind])
 

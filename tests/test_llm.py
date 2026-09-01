@@ -1,5 +1,6 @@
 import json
 import unittest
+import urllib.error
 from unittest import mock
 
 from evoagent.llm import JsonChatClient
@@ -76,6 +77,27 @@ class JsonChatClientTests(unittest.TestCase):
 
         self.assertEqual("final", client.complete_json("lead", "system", "task")["action"])
         self.assertEqual(2, urlopen.call_count)
+
+    @mock.patch("evoagent.llm.time.sleep")
+    @mock.patch("evoagent.llm.urllib.request.urlopen")
+    def test_transient_transport_failure_is_retried_and_accounted(
+        self, urlopen, sleep,
+    ):
+        urlopen.side_effect = [
+            urllib.error.URLError("temporary reset"),
+            FakeResponse('{"action":"final","findings":[]}'),
+        ]
+        ledger = ExecutionLedger("test")
+        client = JsonChatClient("https://example.test", "secret", "model")
+
+        result = client.complete_json("security", "system", "task", ledger)
+
+        self.assertEqual("final", result["action"])
+        self.assertEqual(2, urlopen.call_count)
+        sleep.assert_called_once()
+        calls = ledger.summary()["model_call_log"]
+        self.assertFalse(calls[0]["ok"])
+        self.assertTrue(calls[1]["ok"])
 
 
 if __name__ == "__main__":

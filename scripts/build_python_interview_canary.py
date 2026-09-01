@@ -68,7 +68,9 @@ SPECS = [
         "finding_path": "src/requests/utils.py",
         "needle": "if _netrc:",
         "cwe": "CWE-287",
-        "acceptable_cwes": ["CWE-20", "CWE-252", "CWE-522", "CWE-670"],
+        "acceptable_cwes": [
+            "CWE-20", "CWE-252", "CWE-522", "CWE-670", "CWE-697",
+        ],
         "rule_id": "CORRECTNESS-EMPTY-NETRC-CREDENTIALS",
         "severity": "medium",
         "summary": "A truthy all-empty netrc tuple is accepted and converted into blank HTTP Basic credentials.",

@@ -274,6 +274,37 @@ class FindingPolicyTests(unittest.TestCase):
         self.assertEqual([], suggestions)
         self.assertEqual("confirmed", decisions[0]["disposition"])
 
+    def test_self_refuting_model_finding_is_not_published(self):
+        candidate = finding(rule_id="CWE-248", source="correctness-reliability")
+        candidate.title = "Guard raises TypeError"
+        candidate.explanation = (
+            "The isinstance guard short-circuits correctly, so no defect is introduced."
+        )
+        candidate.fix = "No fix needed."
+        candidate.test = "No test needed."
+        candidate.evidence_refs = [{
+            "evidence_id": "semantic_probe:decimal",
+            "tool": "semantic_probe",
+            "output": {
+                "kind": "decimal-special-exponent",
+                "arbitrary_code_executed": False,
+            },
+        }]
+
+        published, suggestions, decisions = ModeRouterReviewer._partition_publication(
+            [], [candidate], [candidate],
+            [{"finding_index": 0, "publication_ready": True}],
+            repository_available=True,
+            publish_unverified_suggestions=False,
+        )
+
+        self.assertEqual([], published)
+        self.assertEqual([], suggestions)
+        self.assertIn(
+            "finding explicitly states that no actionable defect exists",
+            decisions[0]["reasons"],
+        )
+
     def test_same_line_repository_search_cannot_prove_high_risk_behavior(self):
         candidate = finding(severity=Severity.HIGH)
         candidate.evidence_refs = [{

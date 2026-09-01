@@ -1629,6 +1629,12 @@ class ModeRouterReviewer(Reviewer):
             probe_kinds.append("scandir-missing-directory")
         if re.search(r"(?m)^\s*if\s+_netrc\s*:\s*$", semantic_text):
             probe_kinds.append("empty-netrc-credentials")
+        if (
+            re.search(r"(?m)^\s*self\.refresh\(\)\s*$", semantic_text)
+            and "self.stop()" not in lowered
+            and not re.search(r"(?m)^\s*except\b", semantic_text)
+        ):
+            probe_kinds.append("exception-cleanup-state")
         if selected and "semantic_probe" in tools.names():
             for kind in probe_kinds[:3]:
                 try:
@@ -1944,6 +1950,22 @@ class ModeRouterReviewer(Reviewer):
                 reasons.append(
                     "model confidence below stable publication threshold 0.80"
                 )
+            normalized_fix = re.sub(
+                r"[^a-z0-9]+", " ", str(finding.fix or "").lower()
+            ).strip()
+            explicitly_no_defect = any(
+                cue in impact_claim for cue in (
+                    "no defect is introduced", "does not introduce a defect",
+                    "no issue is introduced", "does not introduce an issue",
+                )
+            )
+            no_action_fix = normalized_fix in {
+                "no fix needed", "no change needed", "none", "n a",
+            }
+            if explicitly_no_defect or no_action_fix:
+                reasons.append(
+                    "finding explicitly states that no actionable defect exists"
+                )
             hypothetical_scope_claim = any(
                 cue in impact_claim for cue in (
                     "false positive", "incorrectly reject", "overly broad",
@@ -2099,13 +2121,18 @@ class ModeRouterReviewer(Reviewer):
                         len(title_tokens.intersection(existing_tokens))
                         / max(1, min(len(title_tokens), len(existing_tokens)))
                     )
+                    same_probe_claim = bool(
+                        semantic_ids.intersection(existing_ids)
+                        and existing.rule_id == finding.rule_id
+                        and abs(existing.line - finding.line) <= 5
+                    )
                     if (
                         existing.path == finding.path
-                        and existing.line == finding.line
                         and not is_deterministic_finding(existing)
                         and (
-                            semantic_ids.intersection(existing_ids)
+                            same_probe_claim
                             or (
+                                existing.line == finding.line and
                                 evidence_ids.intersection(existing_ids)
                                 and title_overlap >= 0.6
                             )

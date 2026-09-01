@@ -79,7 +79,8 @@ class JsonChatClient:
             "Accept": "application/json",
         }
         headers.update(self.extra_headers)
-        for attempt in range(2):
+        max_attempts = 3
+        for attempt in range(max_attempts):
             payload["messages"] = messages
             request = urllib.request.Request(
                 self.base_url + "/chat/completions",
@@ -97,9 +98,11 @@ class JsonChatClient:
                 message = "%s API returned HTTP %d: %s" % (
                     self.provider, exc.code, detail,
                 )
+                retryable = exc.code in {408, 409, 429, 500, 502, 503, 504}
             except (urllib.error.URLError, socket.timeout, ValueError, KeyError,
                     IndexError, TypeError, json.JSONDecodeError) as exc:
                 message = "%s JSON request failed: %s" % (self.provider, exc)
+                retryable = True
             else:
                 candidate = content.strip()
                 if candidate.startswith("```json") and candidate.endswith("```"):
@@ -114,9 +117,11 @@ class JsonChatClient:
                         ledger.record_model(
                             role, self.provider, self.model, body.get("usage") or {},
                             int((time.monotonic() - started) * 1000), False,
-                            message + " (structured-output retry %d/1)" % (attempt + 1),
+                            message + " (structured-output retry %d/%d)" % (
+                                attempt + 1, max_attempts - 1,
+                            ),
                         )
-                    if attempt == 0:
+                    if attempt < max_attempts - 1:
                         messages = [
                             *messages,
                             {"role": "assistant", "content": content[:16000]},
@@ -147,5 +152,8 @@ class JsonChatClient:
                     role, self.provider, self.model, body.get("usage") or {},
                     int((time.monotonic() - started) * 1000), False, message,
                 )
+            if retryable and attempt < max_attempts - 1:
+                time.sleep(min(0.25 * (2 ** attempt), 1.0))
+                continue
             raise RuntimeError(message)
         raise RuntimeError("%s JSON request failed" % self.provider)
