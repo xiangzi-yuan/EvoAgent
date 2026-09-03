@@ -4,3 +4,16 @@ __pycache__/
 .env
 .pytest_cache/
 output/
+
+# 参考仓库：第三方源码，仅供本地对照，不进版本库
+opencode/
+
+# 打包产物与临时目录
+*.zip
+tmp/
+
+# 虚拟环境与 IDE
+.venv/
+venv/
+.idea/
+.vscode/
